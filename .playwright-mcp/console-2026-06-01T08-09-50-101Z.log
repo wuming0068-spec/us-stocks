@@ -1,0 +1,32 @@
+[      82ms] [LOG] 2024/1/19 @ https://gbfek.dfcfw.com/deploy/fd_quote_editor/work/editor.js:21
+[     399ms] [LOG] el JSHandle@node @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[     400ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[     401ms] [LOG] script.src https://gbapi.eastmoney.com/webarticlelist/api/Article/Articlelist?code=usNVDA&sorttype=1&ps=24&from=CommonBaPost&deviceid=quoteweb&version=200&product=Guba&plat=Web&needzd=true&callback=jsonp_1780301390501_1eso8t65v4i @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1143ms] [LOG] json.re [Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object] @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1144ms] [LOG] tempData {data: Array(12), stockbar_code: usnvda, view_more_url: http://guba.eastmoney.com/list,usnvda.html, view_more_url_f: http://guba.eastmoney.com/list,usnvda,f.html, view_more_ba_name: 英伟达} @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1144ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1145ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1146ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1146ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1146ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1147ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1147ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1147ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1147ms] [LOG] execute app @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1147ms] [LOG] post_title:物理AI爆发临近？英伟达发布“全能”世界模型 机 reply:58 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:芯片重磅来袭！黄仁勋杀入AI PC reply:91 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达发布学术研究用的NVIDIA ISAAC  reply:3 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达将NVIDIA DRIVE Hyperio reply:4 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达将与联发科合作开发RTX SPARK个人电 reply:5 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:黄仁勋称AI未减少岗位 软件工程师数量在增加 reply:17 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达CEO黄仁勋发布新AI模型Nemotron reply:3 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达推出包含NemoGuard、Nemotro reply:0 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达：Anthropic、OpenAI 等企业 reply:2 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:英伟达1日宣布推出 NVIDIA DSX 平台， reply:4 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:推理时代地位重塑 2030年全球CPU市场规模将 reply:0 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[    1148ms] [LOG] post_title:6月1日国际晨讯 | 英伟达、微软、Arm三方联 reply:1 @ https://gbfek.eastmoney.com/deploy/article_list/work/article_list.js:21
+[   13619ms] [INFO] {ReturnCode: 0, Msg: 成功, Data: Object} @ https://i.eastmoney.com/websitecaptcha/build/slidervalid.js:1
+[   16120ms] [INFO] [https://quote.eastmoney.com, s, undefined, quote.eastmoney.com] @ https://i.eastmoney.com/websitecaptcha/build/slidervalid.js:1
+[   16120ms] [LOG] silidervalid_ok @ https://i.eastmoney.com/websitecaptcha/build/popwscpc.js:1
+[   45208ms] [ERROR] Failed to load resource: net::ERR_EMPTY_RESPONSE @ https://push2.eastmoney.com/api/qt/stock/kline/get?secid=105.NVDA&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500000&lmt=5:0
+[   45450ms] [ERROR] Failed to load resource: net::ERR_EMPTY_RESPONSE @ https://39.push2his.eastmoney.com/api/qt/stock/kline/get?secid=105.NVDA&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500000&lmt=5:0
