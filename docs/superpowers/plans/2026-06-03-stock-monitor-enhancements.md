@@ -1,3 +1,1189 @@
+# Stock Monitor Enhancements Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add sidebar navigation, enriched card indicators, user-defined industries, and expanded detail analysis to the US stocks monitor.
+
+**Architecture:** Add a fixed left sidebar for industry filtering, enhance card rendering with MA/KDJ/golden-cross indicators, make industries user-defined via localStorage, and add five analysis sections to the expanded detail view. All client-side; no backend changes needed beyond making SECTORS a fallback.
+
+**Tech Stack:** Vanilla HTML/CSS/JS, localStorage for persistence
+
+---
+
+## File Map
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `docs/js/indicators.js` | Modify | Add analysis functions (volume, KDJ interpretation, MA interpretation, summary) |
+| `docs/index.html` | Modify | Add sidebar markup, update add-form with industry field, update detail template |
+| `docs/css/app.css` | Modify | Sidebar layout, enhanced card styles, analysis section styles, responsive |
+| `docs/js/app.js` | Modify | Sidebar rendering, industry management, enhanced card rendering, detail expansion |
+| `scripts/fetch_and_calc.py` | Modify | Add comment that SECTORS is fallback; frontend overrides industry |
+
+---
+
+### Task 1: Add analysis functions to indicators.js
+
+**Files:**
+- Modify: `docs/js/indicators.js`
+
+- [ ] **Step 1: Add volume analysis function**
+
+Add to the `Indicators` object before the closing `};`:
+
+```javascript
+  /**
+   * Analyze volume: compare current volume to recent average.
+   * Returns { ratio, label, color }
+   */
+  analyzeVolume(currentVolume, avgVolume) {
+    if (!avgVolume || avgVolume === 0) return { ratio: null, label: '无对比数据', color: '' };
+    const ratio = currentVolume / avgVolume;
+    let label, color;
+    if (ratio > 1.5) { label = '放量'; color = 'up'; }
+    else if (ratio > 1.1) { label = '温和放量'; color = 'up'; }
+    else if (ratio < 0.5) { label = '缩量'; color = 'down'; }
+    else if (ratio < 0.8) { label = '温和缩量'; color = 'down'; }
+    else { label = '正常'; color = ''; }
+    return { ratio: parseFloat(ratio.toFixed(2)), label, color };
+  },
+
+  /**
+   * Full KDJ analysis returning interpretive text.
+   */
+  analyzeKDJ(k, d, j) {
+    const status = this.getKDJStatus(k, d, j);
+    const parts = [];
+    // Overbought/oversold
+    if (status.kOverbought) parts.push('K值处于超买区(>80)，短期有回调风险');
+    else if (status.kOversold) parts.push('K值处于超卖区(<20)，短期有反弹机会');
+    else parts.push('K值处于正常区间');
+    // Cross
+    if (status.goldenCross) parts.push('K线上穿D线形成金叉，短期看多信号');
+    else if (status.deathCross) parts.push('K线下穿D线形成死叉，短期看空信号');
+    else parts.push('K线与D线未形成交叉');
+    // J value
+    if (status.jTop) parts.push('J值>100，顶部风险警示');
+    else if (status.jBottom) parts.push('J值<0，底部超卖信号');
+    return parts.join('；') + '。';
+  },
+
+  /**
+   * MA5 short-term trend analysis.
+   */
+  analyzeMA5(close, ma5, prevClose) {
+    if (!ma5) return 'MA5数据不可用。';
+    const aboveMA5 = close > ma5;
+    const pctFromMA5 = ((close - ma5) / ma5 * 100).toFixed(2);
+    const direction = aboveMA5 ? '上方' : '下方';
+    const strength = Math.abs(parseFloat(pctFromMA5)) > 3 ? '显著' : '小幅';
+    const trend = prevClose && close > prevClose ? '上涨' : (close < prevClose ? '下跌' : '持平');
+    return `股价在MA5${direction}${pctFromMA5}%，${strength}${aboveMA5 ? '偏离' : '跌破'}；当日${trend}。`;
+  },
+
+  /**
+   * MA20 medium-term trend analysis.
+   */
+  analyzeMA20(close, ma20, ma5) {
+    if (!ma20) return 'MA20数据不可用。';
+    const aboveMA20 = close > ma20;
+    const pctFromMA20 = ((close - ma20) / ma20 * 100).toFixed(2);
+    const direction = aboveMA20 ? '上方' : '下方';
+    const ma = this.getMAAlignment(close, ma5, ma20);
+    const arrangement = ma.alignment === '多头排列' ? '多头排列，中期趋势向好' :
+                        ma.alignment === '空头排列' ? '空头排列，中期趋势偏弱' : '均线交织，趋势不明朗';
+    return `股价在MA20${direction}${pctFromMA20}%；${arrangement}。`;
+  },
+
+  /**
+   * Generate comprehensive summary from all indicators.
+   */
+  generateSummary(stock) {
+    const { close, ma5, ma20, k, d, j, change_pct } = stock;
+    const kdj = this.getKDJStatus(k, d, j);
+    const ma = this.getMAAlignment(close, ma5, ma20);
+    const points = [];
+    // Trend assessment
+    if (ma.alignment === '多头排列' && kdj.goldenCross) {
+      points.push('技术面偏多，均线多头排列且KDJ金叉，短期有上行动力');
+    } else if (ma.alignment === '空头排列' && kdj.deathCross) {
+      points.push('技术面偏空，均线空头排列且KDJ死叉，短期承压');
+    } else if (ma.alignment === '多头排列' && !kdj.deathCross) {
+      points.push('中期趋势向好但短期指标中性，可关注回调机会');
+    } else if (ma.alignment === '空头排列' && !kdj.goldenCross) {
+      points.push('中期趋势偏弱，建议等待明确反转信号');
+    } else {
+      points.push('技术指标多空交织，趋势不明朗，建议观望');
+    }
+    // Overbought/oversold
+    if (kdj.kOverbought) points.push('注意KDJ超买风险，追高需谨慎');
+    if (kdj.kOversold) points.push('KDJ超卖，可能存在超跌反弹机会');
+    // Price action
+    if (change_pct > 2) points.push('当日涨幅较大，短期获利盘可能回吐');
+    if (change_pct < -2) points.push('当日跌幅较大，恐慌情绪可能过度');
+    return points.join('；') + '。';
+  },
+
+  /**
+   * Check if golden cross is currently active (K > D).
+   */
+  hasGoldenCross(k, d) {
+    return k > d;
+  }
+```
+
+- [ ] **Step 2: Verify the file syntax**
+
+Run: `node --check docs/js/indicators.js`
+
+---
+
+### Task 2: Update index.html with sidebar, industry field, and enhanced templates
+
+**Files:**
+- Modify: `docs/index.html`
+
+- [ ] **Step 1: Replace the entire `<body>` content**
+
+Replace everything from `<body>` to `</body>` with:
+
+```html
+<body>
+
+<!-- Left Sidebar -->
+<nav id="sidebar">
+  <div class="sidebar-header">
+    <span class="sidebar-logo">📈</span>
+    <span class="sidebar-title">美股自选</span>
+  </div>
+  <ul class="sidebar-nav">
+    <li class="sidebar-item active" data-nav="signals">
+      <span class="sidebar-icon">🎯</span>
+      <span>今日信号</span>
+      <span id="sidebar-signal-count" class="sidebar-badge hidden">0</span>
+    </li>
+    <li class="sidebar-divider"></li>
+  </ul>
+  <div id="sidebar-industries" class="sidebar-industries">
+    <!-- Dynamically filled -->
+  </div>
+</nav>
+
+<!-- Main Content Area -->
+<div id="main-wrap">
+
+<!-- Top Bar -->
+<header id="top-bar">
+  <div class="top-row">
+    <h1 class="title">📈 美股自选</h1>
+    <div class="top-actions">
+      <button id="btn-refresh" class="btn-icon" title="刷新数据">
+        🔄 <span class="btn-text">刷新</span>
+        <span id="refresh-count" class="badge">剩10次</span>
+      </button>
+      <button id="btn-manage" class="btn-icon" title="管理自选股">⚙</button>
+    </div>
+  </div>
+  <div id="data-status" class="status-bar">
+    📡 数据更新: <span id="update-time">加载中...</span> (基于前一日收盘数据)
+  </div>
+</header>
+
+<!-- Main Content -->
+<main id="content">
+
+  <!-- Search / Add Bar -->
+  <section id="search-section">
+    <div class="search-row">
+      <div class="search-input-wrap">
+        <input type="text" id="search-input" placeholder="🔍 搜索代码或名称..." autocomplete="off">
+        <div id="search-suggestions" class="suggestions-dropdown hidden"></div>
+      </div>
+      <button id="btn-add" class="btn-primary">+ 添加</button>
+    </div>
+    <div id="add-form" class="add-form hidden">
+      <input type="text" id="add-symbol" placeholder="输入美股代码，如 AAPL" autocomplete="off">
+      <input type="text" id="add-industry" placeholder="输入行业，如 科技、AI芯片" autocomplete="off" class="add-industry-input">
+      <div id="add-suggestions" class="suggestions-dropdown hidden"></div>
+      <div class="add-actions">
+        <button id="btn-confirm-add" class="btn-primary btn-sm">确认添加</button>
+        <button id="btn-cancel-add" class="btn-ghost btn-sm">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Signals Area -->
+  <section id="signals-section">
+    <h2 class="section-title">🎯 今日信号</h2>
+    <div id="signals-list"></div>
+    <div id="signals-empty" class="empty-state hidden">暂无明确信号</div>
+  </section>
+
+  <!-- Industry Accordion -->
+  <section id="industries-section">
+    <h2 class="section-title">📊 行业概览</h2>
+    <div id="industries-list"></div>
+    <div id="industries-empty" class="empty-state hidden">没有自选股数据。点击上方「+ 添加」开始添加自选股。</div>
+  </section>
+
+</main>
+
+</div><!-- /#main-wrap -->
+
+<!-- Detail Card Template (hidden) -->
+<template id="tmpl-detail-card">
+  <div class="detail-card">
+    <div class="detail-price-row">
+      <div class="detail-header">
+        <span class="detail-symbol"></span>
+        <span class="detail-name"></span>
+      </div>
+      <div class="detail-price-info">
+        <span class="detail-close"></span>
+        <span class="detail-change"></span>
+      </div>
+    </div>
+    <div class="detail-metrics">
+      <div class="metric"><span class="metric-label">昨收</span><span class="metric-value prev-close"></span></div>
+      <div class="metric"><span class="metric-label">开盘</span><span class="metric-value open"></span></div>
+      <div class="metric"><span class="metric-label">成交量</span><span class="metric-value volume"></span></div>
+      <div class="metric"><span class="metric-label">市值</span><span class="metric-value mcap"></span></div>
+    </div>
+    <div class="detail-ma-row">
+      <span class="ma-item">MA5 <strong class="ma5-val"></strong></span>
+      <span class="ma-desc"></span>
+      <span class="ma-item">MA20 <strong class="ma20-val"></strong></span>
+      <span class="ma-align"></span>
+    </div>
+    <div class="detail-kdj-row">
+      <span class="kdj-label">KDJ</span>
+      <span class="kdj-item k-val"></span>
+      <span class="kdj-item d-val"></span>
+      <span class="kdj-item j-val"></span>
+    </div>
+  </div>
+</template>
+
+<!-- Watchlist Manager Modal Template -->
+<template id="tmpl-manage-modal">
+  <div class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📋 管理自选股</h3>
+        <button class="btn-close-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="manage-search">
+          <input type="text" placeholder="🔍 筛选自选股..." class="manage-filter">
+        </div>
+        <div class="manage-list"></div>
+        <div class="manage-empty empty-state hidden">自选股列表为空</div>
+        <div class="manage-batch">
+          <textarea placeholder="批量添加代码&#10;格式: 代码,行业&#10;如：&#10;AAPL,科技&#10;NVDA,AI芯片&#10;MSFT,科技" class="batch-input" rows="6"></textarea>
+          <button class="btn-primary btn-batch-add">批量添加</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<script src="js/indicators.js"></script>
+<script src="js/app.js"></script>
+</body>
+```
+
+---
+
+### Task 3: Rewrite app.css with sidebar layout and new styles
+
+**Files:**
+- Modify: `docs/css/app.css`
+
+- [ ] **Step 1: Replace entire CSS file**
+
+Replace the entire content of `docs/css/app.css` with:
+
+```css
+/* === CSS Custom Properties === */
+:root {
+  --color-bg: #f5f6fa;
+  --color-card: #ffffff;
+  --color-primary: #1976d2;
+  --color-success: #2e7d32;
+  --color-danger: #c62828;
+  --color-warning: #e65100;
+  --color-text: #1a1a2e;
+  --color-text-secondary: #666;
+  --color-border: #e8e8e8;
+  --color-blue-bg: #e3f2fd;
+  --color-blue-text: #1565c0;
+  --color-buy-bg: #e8f5e9;
+  --color-sell-bg: #ffebee;
+  --color-watch-bg: #fff3e0;
+  --color-overbought: #e53935;
+  --color-oversold: #43a047;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-modal: 0 8px 32px rgba(0,0,0,0.2);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --sidebar-width: 170px;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+
+/* === Reset & Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  display: flex;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === Sidebar === */
+#sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  z-index: 150;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.sidebar-logo { font-size: 1.2rem; }
+.sidebar-title { font-weight: 700; font-size: 0.9rem; color: #fff; }
+
+.sidebar-nav {
+  list-style: none;
+  padding: 8px 0;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+  color: #b0b0c0;
+}
+
+.sidebar-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.sidebar-item.active { background: rgba(255,255,255,0.12); color: #fff; border-left: 3px solid var(--color-primary); padding-left: 11px; }
+
+.sidebar-icon { font-size: 0.9rem; }
+
+.sidebar-badge {
+  margin-left: auto;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 0.6rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.08);
+  margin: 4px 14px;
+}
+
+.sidebar-industries {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-industry-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #b0b0c0;
+  transition: background 0.15s;
+}
+
+.sidebar-industry-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.sidebar-industry-item.active { background: rgba(255,255,255,0.12); color: #fff; border-left: 3px solid var(--color-success); padding-left: 11px; }
+
+.sidebar-industry-icon { font-size: 0.8rem; }
+.sidebar-industry-count { margin-left: auto; font-size: 0.65rem; color: #888; }
+
+/* === Main Wrap === */
+#main-wrap {
+  margin-left: var(--sidebar-width);
+  flex: 1;
+  min-width: 0;
+  max-width: 768px;
+}
+
+/* === Top Bar === */
+#top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--color-card);
+  box-shadow: var(--shadow-card);
+}
+
+.top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.title {
+  font-size: 1.125rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.top-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f5f5f5;
+  border: 1px solid var(--color-border);
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.btn-icon:active { background: #e0e0e0; }
+
+.badge {
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+}
+
+.status-bar {
+  padding: 8px 14px;
+  background: var(--color-blue-bg);
+  color: var(--color-blue-text);
+  font-size: 0.75rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+/* === Main Content === */
+#content {
+  padding: 12px 14px 32px;
+}
+
+/* === Search Section === */
+#search-section {
+  margin-bottom: 14px;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-input-wrap {
+  flex: 1;
+  position: relative;
+}
+
+#search-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+#search-input:focus { border-color: var(--color-primary); }
+
+.suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.suggestions-dropdown.hidden { display: none; }
+
+.suggestion-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f5f5f5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.suggestion-item:last-child { border-bottom: none; }
+.suggestion-item:hover { background: #f0f4ff; }
+.suggestion-item .sugg-symbol { font-weight: 700; }
+.suggestion-item .sugg-name { color: var(--color-text-secondary); font-size: 0.75rem; }
+
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.btn-primary:active { background: #1565c0; }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.btn-sm { padding: 6px 12px; font-size: 0.78rem; }
+
+/* Add Form */
+.add-form {
+  margin-top: 8px;
+  background: var(--color-card);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.add-form.hidden { display: none; }
+
+#add-symbol, .add-industry-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.add-industry-input { margin-top: 6px; }
+
+.add-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+/* === Section Title === */
+.section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-primary);
+  display: inline-block;
+}
+
+/* === Signals Area === */
+#signals-section {
+  margin-bottom: 18px;
+}
+
+#signals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signal-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-card);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: transform 0.1s;
+  gap: 6px;
+}
+
+.signal-card:active { transform: scale(0.98); }
+
+.signal-card.buy { border-left: 4px solid var(--color-success); }
+.signal-card.sell { border-left: 4px solid var(--color-danger); }
+.signal-card.watch { border-left: 4px solid var(--color-warning); }
+
+.signal-info { display: flex; align-items: center; gap: 8px; }
+.signal-symbol { font-weight: 700; font-size: 0.9rem; }
+.signal-name { color: var(--color-text-secondary); font-size: 0.75rem; }
+.signal-change { font-weight: 600; }
+.signal-change.up { color: var(--color-success); }
+.signal-change.down { color: var(--color-danger); }
+
+.signal-badge {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.signal-badge.buy { background: var(--color-buy-bg); color: var(--color-success); }
+.signal-badge.sell { background: var(--color-sell-bg); color: var(--color-danger); }
+.signal-badge.watch { background: var(--color-watch-bg); color: var(--color-warning); }
+
+/* Signal indicator row */
+.signal-indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.sig-ind {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #f5f5f5;
+}
+
+.sig-ind.bull { color: var(--color-success); }
+.sig-ind.bear { color: var(--color-danger); }
+.sig-ind.golden { background: #fff9c4; color: #f57f17; font-weight: 700; }
+
+/* === Industry Accordion === */
+#industries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.industry-group {
+  background: var(--color-card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.industry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.industry-header:active { background: #f9f9f9; }
+
+.industry-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.industry-count {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.industry-change {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.industry-change.up { color: var(--color-success); }
+.industry-change.down { color: var(--color-danger); }
+
+.industry-arrow {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  transition: transform 0.2s;
+  margin-left: 4px;
+}
+
+.industry-group.open .industry-arrow { transform: rotate(180deg); }
+
+.industry-stocks {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.industry-group.open .industry-stocks {
+  max-height: 5000px;
+}
+
+.stock-row {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-top: 1px solid #f5f5f5;
+  cursor: pointer;
+  transition: background 0.1s;
+  gap: 4px;
+}
+
+.stock-row:active { background: #f9f9f9; }
+
+.stock-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stock-row-left { flex: 1; min-width: 0; }
+.stock-row-symbol { font-weight: 700; font-size: 0.85rem; }
+.stock-row-name { color: var(--color-text-secondary); font-size: 0.7rem; margin-left: 4px; }
+
+.stock-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stock-row-price { font-weight: 600; font-size: 0.85rem; font-family: var(--font-mono); }
+.stock-row-change { font-weight: 600; font-size: 0.78rem; font-family: var(--font-mono); }
+.stock-row-change.up { color: var(--color-success); }
+.stock-row-change.down { color: var(--color-danger); }
+
+.stock-row-signal {
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.stock-row-signal.buy { background: var(--color-buy-bg); color: var(--color-success); }
+.stock-row-signal.sell { background: var(--color-sell-bg); color: var(--color-danger); }
+.stock-row-signal.watch { background: var(--color-watch-bg); color: var(--color-warning); }
+
+/* Stock row indicator bar */
+.stock-indicators {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.68rem;
+  flex-wrap: wrap;
+}
+
+.stock-ind {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.stock-ind.bull { color: var(--color-success); }
+.stock-ind.bear { color: var(--color-danger); }
+.stock-ind.golden { background: #fff9c4; color: #f57f17; font-weight: 700; padding: 0 4px; border-radius: 3px; }
+
+/* === Detail Card (inside stock row expansion) === */
+.stock-detail-wrap {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+  border-top: none;
+}
+
+.stock-detail-wrap.open {
+  max-height: 900px;
+}
+
+.detail-card {
+  padding: 12px 14px;
+  background: #fafbfc;
+  border-top: 1px solid var(--color-border);
+}
+
+.detail-price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.detail-symbol { font-weight: 700; font-size: 1rem; }
+.detail-name { color: var(--color-text-secondary); font-size: 0.75rem; margin-left: 4px; }
+.detail-close { font-size: 1.2rem; font-weight: 700; font-family: var(--font-mono); }
+.detail-change { font-size: 0.85rem; font-weight: 600; margin-left: 6px; font-family: var(--font-mono); }
+.detail-change.up { color: var(--color-success); }
+.detail-change.down { color: var(--color-danger); }
+
+.detail-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.metric {
+  background: #f0f1f3;
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  text-align: center;
+}
+
+.metric-label { display: block; font-size: 0.6rem; color: var(--color-text-secondary); }
+.metric-value { display: block; font-weight: 600; font-size: 0.8rem; margin-top: 2px; }
+
+.detail-ma-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid #eee;
+  font-size: 0.75rem;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ma-item { white-space: nowrap; }
+.ma-item strong { color: var(--color-primary); font-size: 0.8rem; }
+.ma-desc { color: var(--color-success); font-size: 0.65rem; }
+.ma-desc.bearish { color: var(--color-danger); }
+.ma-align { font-size: 0.65rem; }
+.ma-align.bullish { color: var(--color-success); }
+.ma-align.bearish { color: var(--color-danger); }
+
+.detail-kdj-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  font-size: 0.75rem;
+}
+
+.kdj-label { color: var(--color-text-secondary); font-size: 0.65rem; }
+.kdj-item {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.kdj-item.k-val { background: var(--color-blue-bg); color: var(--color-blue-text); }
+.kdj-item.d-val { background: #f3e5f5; color: #7b1fa2; }
+.kdj-item.j-val { background: var(--color-watch-bg); color: var(--color-warning); }
+
+/* === Detail Analysis Sections === */
+.detail-analysis {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 2px solid var(--color-primary);
+}
+
+.analysis-section {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid #ddd;
+}
+
+.analysis-section.volume { border-left-color: #ff9800; }
+.analysis-section.kdj { border-left-color: #9c27b0; }
+.analysis-section.ma5 { border-left-color: #2196f3; }
+.analysis-section.ma20 { border-left-color: #4caf50; }
+.analysis-section.summary { border-left-color: var(--color-primary); background: var(--color-blue-bg); }
+
+.analysis-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.analysis-body {
+  font-size: 0.72rem;
+  color: #444;
+  line-height: 1.6;
+}
+
+/* === Manage Modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.modal-content {
+  background: var(--color-card);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-header h3 { font-size: 1rem; }
+
+.btn-close-modal {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 4px 8px;
+}
+
+.modal-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.manage-search { margin-bottom: 12px; }
+
+.manage-filter {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.manage-list { display: flex; flex-direction: column; }
+
+.manage-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f5f5f5;
+  gap: 8px;
+}
+
+.manage-item-name { font-size: 0.85rem; flex: 1; min-width: 0; }
+.manage-item-symbol { font-weight: 700; }
+.manage-item-desc { color: var(--color-text-secondary); font-size: 0.7rem; margin-left: 6px; }
+
+.manage-item-industry {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: #e8e8e8;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  max-width: 80px;
+  text-align: center;
+}
+
+.manage-item-industry:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: #fff;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.btn-delete:active { background: var(--color-sell-bg); }
+
+.manage-batch {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 2px solid var(--color-border);
+}
+
+.batch-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  resize: vertical;
+  outline: none;
+}
+
+.btn-batch-add {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* === Toast === */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 90%;
+  max-width: 400px;
+}
+
+.toast {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-align: center;
+  animation: fadeIn 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.toast.success { background: var(--color-success); }
+.toast.error { background: var(--color-danger); }
+.toast.info { background: var(--color-primary); }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* === Empty State === */
+.empty-state {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: 24px 14px;
+  font-size: 0.85rem;
+}
+
+.hidden { display: none !important; }
+
+/* === Mobile Responsive === */
+@media (max-width: 600px) {
+  #sidebar {
+    width: 50px;
+    --sidebar-width: 50px;
+  }
+  .sidebar-title, .sidebar-item span:not(.sidebar-icon):not(.sidebar-badge),
+  .sidebar-industry-item span:not(.sidebar-industry-icon):not(.sidebar-industry-count) {
+    display: none;
+  }
+  .sidebar-industry-count { display: none; }
+  #main-wrap { margin-left: 50px; }
+  .detail-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .top-row {
+    padding: 8px 10px;
+  }
+  #content {
+    padding: 10px 10px 24px;
+  }
+  .btn-text { display: none; }
+  .status-bar { font-size: 0.7rem; padding: 6px 10px; }
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+#sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+
+/* === KDJ Status Colors === */
+.overbought { color: var(--color-overbought); font-weight: 700; }
+.oversold { color: var(--color-oversold); font-weight: 700; }
+```
+
+---
+
+### Task 4: Rewrite app.js with all new functionality
+
+**Files:**
+- Modify: `docs/js/app.js`
+
+- [ ] **Step 1: Replace the entire app.js file**
+
+Replace the entire content of `docs/js/app.js` with the complete new implementation (see below for full code). The key changes are:
+
+1. New `App.stockIndustries` state (loaded from localStorage)
+2. New `App.activeIndustry` state for sidebar filtering
+3. `loadIndustries()` / `saveIndustries()` methods
+4. `getIndustry(symbol)` — returns user-defined industry or fallback
+5. `renderSidebar()` — builds sidebar nav dynamically
+6. Enhanced `renderSignals()` with indicator row
+7. Enhanced `stockRowHTML()` with indicator row
+8. Enhanced `toggleDetail()` with five analysis sections
+9. Updated `confirmAdd()` with industry input
+10. Updated `showManageModal()` with inline industry editing
+11. Updated `batchAdd` to support "SYMBOL,INDUSTRY" format
+
+Full replacement code for `docs/js/app.js`:
+
+```javascript
 // app.js — US Stocks Monitor Core Application
 // ============================================================
 // PART 1: State & Init
@@ -483,6 +1669,7 @@ App.renderIndustries = function() {
   // Attach stock row click events for detail expansion
   this.$$('.stock-row').forEach(function(row) {
     row.addEventListener('click', function(e) {
+      // Don't toggle if clicking on indicator area (allow text selection)
       var symbol = row.getAttribute('data-symbol');
       self.toggleDetail(symbol, row);
     });
@@ -624,8 +1811,8 @@ App.toggleDetail = function(symbol, rowEl) {
             '当日成交量: ' + Indicators.formatVolume(stock.volume) +
             (volAnalysis.ratio ? '，为近期均量的 ' + volAnalysis.ratio.toFixed(1) + ' 倍' : '') +
             '，<strong class="' + volClass + '">' + volLabel + '</strong>。' +
-            (volAnalysis.ratio && volAnalysis.ratio > 1.3 ? '成交量显著放大，表明市场参与度高，价格变动可信度较强。' :
-             volAnalysis.ratio && volAnalysis.ratio < 0.7 ? '成交量萎缩，市场参与度低，价格变动可能缺乏持续性。' :
+            (volAnalysis.ratio > 1.3 ? '成交量显著放大，表明市场参与度高，价格变动可信度较强。' :
+             volAnalysis.ratio < 0.7 ? '成交量萎缩，市场参与度低，价格变动可能缺乏持续性。' :
              '成交量处于正常水平，市场情绪平稳。') +
           '</div>' +
         '</div>' +
@@ -979,3 +2166,66 @@ App.bindEvents = function() {
     App.init();
   }
 })();
+```
+
+---
+
+### Task 5: Update Python script with fallback note
+
+**Files:**
+- Modify: `scripts/fetch_and_calc.py`
+
+- [ ] **Step 1: Add comment above SECTORS dict**
+
+At line 43 in `scripts/fetch_and_calc.py`, add a comment above the SECTORS dictionary:
+
+```python
+# NOTE: SECTORS is a fallback only. The frontend allows users to define custom
+# industries per stock, stored in localStorage. Any industry values set here
+# will be overridden by user-defined industries in the UI.
+SECTORS = {
+```
+
+---
+
+### Task 6: Verify changes work
+
+**Files:**
+- Verify: `docs/index.html`, `docs/css/app.css`, `docs/js/indicators.js`, `docs/js/app.js`
+
+- [ ] **Step 1: Check JavaScript syntax**
+
+Run: `node --check docs/js/indicators.js && node --check docs/js/app.js`
+
+- [ ] **Step 2: Open the page in browser**
+
+Run: Start a local server and navigate to the page:
+```bash
+cd "C:\us stocks\docs" && npx serve . --no-clipboard
+```
+
+Expected: Page loads with left sidebar showing industry list, enhanced cards with indicator rows, and clicking a stock row expands to show five analysis sections.
+
+- [ ] **Step 3: Test add stock with industry**
+
+1. Click "+ 添加"
+2. Enter a symbol and an industry
+3. Confirm
+Expected: Stock appears under correct industry in sidebar and main content
+
+- [ ] **Step 4: Test sidebar filtering**
+
+1. Click an industry in the sidebar
+Expected: Main content shows only stocks from that industry; sidebar item is highlighted
+
+- [ ] **Step 5: Test detail expansion**
+
+1. Click a stock row
+Expected: Detail card expands with five analysis sections (volume, KDJ, MA5, MA20, summary)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add docs/index.html docs/css/app.css docs/js/indicators.js docs/js/app.js scripts/fetch_and_calc.py docs/superpowers/
+git commit -m "feat: add sidebar nav, enhanced cards, custom industries, detail analysis"
+```
