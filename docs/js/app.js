@@ -183,9 +183,13 @@ const App = {
       if (!groups[sec]) groups[sec] = [];
       groups[sec].push(s);
     });
-    // Sort stocks within each sector by market cap desc
+    // Sort stocks within each sector: signal priority (buy > sell > watch > none), then market cap desc
+    var signalRank = { buy: 0, sell: 1, watch: 2 };
     Object.keys(groups).forEach(function(key) {
       groups[key].sort(function(a, b) {
+        var rankA = signalRank[a._signal] != null ? signalRank[a._signal] : 3;
+        var rankB = signalRank[b._signal] != null ? signalRank[b._signal] : 3;
+        if (rankA !== rankB) return rankA - rankB;
         return (b.market_cap || 0) - (a.market_cap || 0);
       });
     });
@@ -336,23 +340,15 @@ App.indicatorRowHTML = function(stock) {
   var ma20Arrow = ma20Above ? '↑' : '↓';
   var ma20Pct = ma20 ? ((close - ma20) / ma20 * 100).toFixed(1) : '-';
 
-  // Golden cross
-  var hasGC = Indicators.hasGoldenCross(k, d);
-
   var html = '';
 
   // MA5 indicator
   html += '<span class="stock-ind ' + ma5Class + '">MA5:' + ma5Arrow + ma5Pct + '%</span>';
   // MA20 indicator
   html += '<span class="stock-ind ' + ma20Class + '">MA20:' + ma20Arrow + ma20Pct + '%</span>';
-  // KDJ values
-  if (k != null && d != null && stock.j != null) {
-    html += '<span class="stock-ind">K:' + k.toFixed(1) + ' D:' + d.toFixed(1) + ' J:' + stock.j.toFixed(1) + '</span>';
-  }
-  // Golden cross indicator
-  if (hasGC) {
-    html += '<span class="stock-ind golden">✨金叉</span>';
-  }
+  // KDJ signal interpretation (replaces raw K/D/J values)
+  var kdjSig = Indicators.getKDJSignalText(k, d, stock.j);
+  html += '<span class="stock-ind kdj-sig ' + kdjSig.cssClass + '">' + kdjSig.text + '</span>';
 
   return html;
 };
@@ -381,19 +377,32 @@ App.updateStatusBar = function() {
 /** Render signal cards for buy/sell/watch stocks */
 App.renderSignals = function() {
   var stocks = this.getFilteredStocks();
-  var signals = stocks.filter(function(s) {
-    return s._signal && s._signal !== 'watch';
+
+  // Collect all stocks that have signals
+  var buyStocks = [];
+  var sellStocks = [];
+  var watchStocks = [];
+
+  stocks.forEach(function(s) {
+    if (s._signal === 'buy') buyStocks.push(s);
+    else if (s._signal === 'sell') sellStocks.push(s);
+    else if (s._signal === 'watch') watchStocks.push(s);
   });
-  // Also include watch signals
-  var watchStocks = stocks.filter(function(s) {
-    return s._signal === 'watch';
-  });
+
+  // Sort each group by market cap descending
+  var byMarketCap = function(a, b) {
+    return (b.market_cap || 0) - (a.market_cap || 0);
+  };
+  buyStocks.sort(byMarketCap);
+  sellStocks.sort(byMarketCap);
+  watchStocks.sort(byMarketCap);
+
+  // Buy first, then sell, then watch
+  var allSignals = buyStocks.concat(sellStocks).concat(watchStocks);
 
   var list = this.$('#signals-list');
   var empty = this.$('#signals-empty');
   list.innerHTML = '';
-
-  var allSignals = signals.concat(watchStocks);
 
   if (allSignals.length === 0) {
     empty.classList.remove('hidden');
@@ -405,6 +414,7 @@ App.renderSignals = function() {
   allSignals.forEach(function(stock) {
     var card = document.createElement('div');
     card.className = 'signal-card ' + (stock._signal || '');
+    var phase = Indicators.getMarketPhase(stock);
     card.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;">' +
         '<div class="signal-info">' +
@@ -414,7 +424,10 @@ App.renderSignals = function() {
             Indicators.formatChange(stock.change_pct) +
           '</span>' +
         '</div>' +
-        '<span class="signal-badge ' + (stock._signal || '') + '">' + Indicators.signalText(stock._signal) + '</span>' +
+        '<div class="signal-badges">' +
+          '<span class="stock-row-phase ' + phase.cssClass + '">' + phase.label + '</span>' +
+          '<span class="signal-badge ' + (stock._signal || '') + '">' + Indicators.signalText(stock._signal) + '</span>' +
+        '</div>' +
       '</div>' +
       '<div class="signal-indicators">' + self.indicatorRowHTML(stock) + '</div>';
 
@@ -495,6 +508,8 @@ App.stockRowHTML = function(stock) {
   var signalBadge = stock._signal
     ? '<span class="stock-row-signal ' + stock._signal + '">' + Indicators.signalText(stock._signal) + '</span>'
     : '';
+  var phase = Indicators.getMarketPhase(stock);
+  var phaseBadge = '<span class="stock-row-phase ' + phase.cssClass + '">' + phase.label + '</span>';
   var indRow = this.indicatorRowHTML(stock);
   return (
     '<div class="stock-row" data-symbol="' + stock.symbol + '">' +
@@ -506,6 +521,7 @@ App.stockRowHTML = function(stock) {
         '<div class="stock-row-right">' +
           '<span class="stock-row-price">$' + Indicators.formatPrice(stock.close) + '</span>' +
           '<span class="stock-row-change ' + chgClass + '">' + Indicators.formatChange(stock.change_pct) + '</span>' +
+          phaseBadge +
           signalBadge +
         '</div>' +
       '</div>' +
@@ -548,7 +564,7 @@ App.toggleDetail = function(symbol, rowEl) {
     var card = wrapEl.querySelector('.detail-card');
     if (!card) return;
 
-    var kdj = Indicators.getKDJStatus(stock.k, stock.d, stock.j);
+    var kdjSig = Indicators.getKDJSignalText(stock.k, stock.d, stock.j);
     var ma = Indicators.getMAAlignment(stock.close, stock.ma5, stock.ma20);
     var chgClass = Indicators.changeClass(stock.change_pct);
 
@@ -566,9 +582,11 @@ App.toggleDetail = function(symbol, rowEl) {
 
     // Full analyses
     var kdjAnalysis = Indicators.analyzeKDJ(stock.k, stock.d, stock.j);
-    var ma5Analysis = Indicators.analyzeMA5(stock.close, stock.ma5, stock.prev_close);
-    var ma20Analysis = Indicators.analyzeMA20(stock.close, stock.ma20, stock.ma5);
+    var maAnalysis = Indicators.analyzeMA20(stock.close, stock.ma20, stock.ma5);
     var summary = Indicators.generateSummary(stock);
+
+    // Right-side analysis
+    var rightSide = Indicators.analyzeRightSide(stock);
 
     card.innerHTML =
       // Price row
@@ -596,7 +614,7 @@ App.toggleDetail = function(symbol, rowEl) {
         '<div class="metric"><span class="metric-label">成交均价</span><span class="metric-value">$' + Indicators.formatPrice(stock.vwap) + '</span></div>' +
         '<div class="metric"><span class="metric-label">数据日期</span><span class="metric-value">' + (this.dataDate || '-') + '</span></div>' +
       '</div>' +
-      // MA row
+      // MA row (compact stats)
       '<div class="detail-ma-row">' +
         '<span class="ma-item">MA5 <strong>$' + Indicators.formatPrice(stock.ma5) + '</strong></span>' +
         '<span class="ma-desc' + maDescClass + '">' +
@@ -607,13 +625,13 @@ App.toggleDetail = function(symbol, rowEl) {
           (ma.alignment === '多头排列' ? '⬆ 多头排列' : (ma.alignment === '空头排列' ? '⬇ 空头排列' : ma.alignment)) +
         '</span>' +
       '</div>' +
-      // KDJ row
+      // KDJ row (signal interpretation, no raw values)
       '<div class="detail-kdj-row">' +
         '<span class="kdj-label">KDJ</span>' +
         '<span class="kdj-item k-val' + kOverClass + '">K: ' + stock.k.toFixed(1) + '</span>' +
         '<span class="kdj-item d-val">D: ' + stock.d.toFixed(1) + '</span>' +
         '<span class="kdj-item j-val' + jOverClass + '">J: ' + stock.j.toFixed(1) + '</span>' +
-        (Indicators.hasGoldenCross(stock.k, stock.d) ? '<span style="font-size:0.7rem;color:#f57f17;font-weight:700;">✨金叉</span>' : '') +
+        '<span class="kdj-signal-text ' + kdjSig.cssClass + '">' + kdjSig.text + '</span>' +
       '</div>' +
       // Analysis sections
       '<div class="detail-analysis">' +
@@ -634,16 +652,44 @@ App.toggleDetail = function(symbol, rowEl) {
           '<div class="analysis-title">🔮 KDJ 指标分析</div>' +
           '<div class="analysis-body">' + kdjAnalysis + '</div>' +
         '</div>' +
-        // MA5 analysis
-        '<div class="analysis-section ma5">' +
-          '<div class="analysis-title">📈 5日均线 (MA5) 分析</div>' +
-          '<div class="analysis-body">' + ma5Analysis + '</div>' +
+        // Merged MA5 + MA20 analysis
+        '<div class="analysis-section ma-combined">' +
+          '<div class="analysis-title">📈 均线分析 (MA5 & MA20)</div>' +
+          '<div class="analysis-body">' +
+            '<p><strong>均线排列：</strong>' + ma.alignment + '（MA5: $' + Indicators.formatPrice(stock.ma5) + '，MA20: $' + Indicators.formatPrice(stock.ma20) + '）</p>' +
+            '<p><strong>MA5偏离：</strong>股价在MA5' + (ma.priceAboveMA5 ? '上方 ' : '下方 ') +
+              Math.abs(parseFloat(((stock.close - stock.ma5) / stock.ma5 * 100).toFixed(2))) + '%</p>' +
+            '<p><strong>MA20偏离：</strong>股价在MA20' + (ma.priceAboveMA20 ? '上方 ' : '下方 ') +
+              Math.abs(parseFloat(((stock.close - stock.ma20) / stock.ma20 * 100).toFixed(2))) + '%</p>' +
+            '<p>' + maAnalysis + '</p>' +
+          '</div>' +
         '</div>' +
-        // MA20 analysis
-        '<div class="analysis-section ma20">' +
-          '<div class="analysis-title">📉 20日均线 (MA20) 分析</div>' +
-          '<div class="analysis-body">' + ma20Analysis + '</div>' +
-        '</div>' +
+        // Right-side indicator analysis
+        (rightSide ? (
+        '<div class="analysis-section right-side">' +
+          '<div class="analysis-title">🎯 右侧指标分析</div>' +
+          '<div class="analysis-body">' +
+            '<div class="right-side-summary">' +
+              '<span class="rs-trend ' + (rightSide.isApplicable ? 'rs-bull' : 'rs-bear') + '">MA20趋势：' + rightSide.trendDirection + '（斜率 ' + (rightSide.ma20Slope >= 0 ? '+' : '') + rightSide.ma20Slope.toFixed(2) + '%/日）</span>' +
+              '<span class="rs-deviation">当前偏离MA20：' + (rightSide.deviation >= 0 ? '+' : '') + rightSide.deviationPct + '%</span>' +
+            '</div>' +
+            '<div class="right-side-zone">' +
+              '<div class="rs-zone-title">📐 买入区间（经验参数 L=' + rightSide.L + '% U=' + (rightSide.U >= 0 ? '+' : '') + rightSide.U + '%）</div>' +
+              '<div class="rs-prices">' +
+                '<div class="rs-price-item b1"><span>B1 试探买点</span><strong>$' + Indicators.formatPrice(rightSide.lowerPrice) + '</strong><small>20%仓位</small></div>' +
+                '<div class="rs-price-item b2"><span>B2 标准买点</span><strong>$' + Indicators.formatPrice(rightSide.midPrice) + '</strong><small>30%仓位</small></div>' +
+                '<div class="rs-price-item b3"><span>B3 确认买点</span><strong>$' + Indicators.formatPrice(rightSide.upperPrice) + '</strong><small>50%仓位</small></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="right-side-info">' +
+              '<span class="rs-stop-loss">🛑 止损价：$' + Indicators.formatPrice(rightSide.stopLoss) + '（下限×0.98）</span>' +
+              '<span class="rs-current">📍 当前位置：' + rightSide.currentPriceRelative + '</span>' +
+            '</div>' +
+            (rightSide.isApplicable ? '' : '<div class="rs-warning">⚠ MA20未处于上升趋势，右侧交易条件不满足，建议观望或切换左侧策略</div>') +
+            '<div class="rs-note">📌 基于经验默认参数计算。历史回调数据充足后将自动切换为个性化统计参数。</div>' +
+          '</div>' +
+        '</div>'
+        ) : '') +
         // Summary
         '<div class="analysis-section summary">' +
           '<div class="analysis-title">📝 综合总结</div>' +

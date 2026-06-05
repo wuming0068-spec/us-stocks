@@ -530,7 +530,7 @@ body {
 }
 
 .stock-detail-wrap.open {
-  max-height: 900px;
+  max-height: 1600px;
 }
 
 .detail-card {
@@ -844,6 +844,174 @@ body {
 
 #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
 
+/* === KDJ Signal Text in Cards === */
+.kdj-sig {
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.kdj-sig.kdj-oversold { background: #e8f5e9; color: #2e7d32; }
+.kdj-sig.kdj-overbought { background: #ffebee; color: #c62828; }
+.kdj-sig.kdj-golden { background: #fff9c4; color: #f57f17; font-weight: 700; }
+.kdj-sig.kdj-death { background: #fce4ec; color: #c62828; }
+.kdj-sig.kdj-low { background: #e8f5e9; color: #558b2f; }
+.kdj-sig.kdj-high { background: #fff3e0; color: #e65100; }
+.kdj-sig.kdj-normal { color: #666; }
+
+/* === Market Phase Labels === */
+.stock-row-phase {
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phase-right { background: #e8f5e9; color: #2e7d32; }
+.phase-left { background: #ffebee; color: #c62828; }
+.phase-ranging { background: #f5f5f5; color: #888; }
+
+/* === Signal Badges Container === */
+.signal-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* === KDJ Signal Text in Detail === */
+.kdj-signal-text {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* === Combined MA Analysis === */
+.analysis-section.ma-combined { border-left-color: #2196f3; }
+
+/* === Right-Side Indicator Analysis === */
+.analysis-section.right-side { border-left-color: #ff6f00; }
+
+.right-side-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+}
+
+.rs-trend {
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.rs-trend.rs-bull { background: #e8f5e9; color: #2e7d32; }
+.rs-trend.rs-bear { background: #ffebee; color: #c62828; }
+
+.rs-deviation {
+  padding: 2px 8px;
+  background: #e3f2fd;
+  color: #1565c0;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.right-side-zone {
+  background: #fff8e1;
+  border: 1px solid #ffe0b2;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.rs-zone-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #e65100;
+  margin-bottom: 6px;
+}
+
+.rs-prices {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.rs-price-item {
+  background: #fff;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rs-price-item span {
+  font-size: 0.62rem;
+  color: #888;
+}
+
+.rs-price-item strong {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.rs-price-item small {
+  font-size: 0.6rem;
+  color: var(--color-text-secondary);
+}
+
+.rs-price-item.b1 { border-left: 3px solid #4caf50; }
+.rs-price-item.b2 { border-left: 3px solid #ff9800; }
+.rs-price-item.b3 { border-left: 3px solid #2196f3; }
+
+.right-side-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 0.7rem;
+}
+
+.rs-stop-loss {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.rs-current {
+  color: #1565c0;
+  font-weight: 600;
+}
+
+.rs-warning {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.rs-note {
+  font-size: 0.65rem;
+  color: #999;
+  font-style: italic;
+  margin-top: 4px;
+}
+
 /* === KDJ Status Colors === */
 .overbought { color: var(--color-overbought); font-weight: 700; }
 .oversold { color: var(--color-oversold); font-weight: 700; }
+
+/* === Responsive Right-Side Prices === */
+@media (max-width: 600px) {
+  .rs-prices {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,88 @@
+name: Daily Stock Data Update
+
+on:
+  schedule:
+    # UTC 00:00 = Beijing 08:00
+    - cron: '0 0 * * 1-5'   # Weekdays only (Mon-Fri, US market days)
+  workflow_dispatch:          # Manual trigger via GitHub UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+          playwright install chromium
+
+      - name: Fetch stock data
+        run: python scripts/fetch_data.py
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/stocks.json docs/data/history/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "data: daily update $(date +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Send pushplus notification
+        if: success()
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: |
+          STOCKS=$(cat docs/data/stocks.json | python -c "
+import json, sys
+data = json.load(sys.stdin)
+stocks = data['stocks']
+up = sum(1 for s in stocks if s['change_pct'] > 0)
+down = sum(1 for s in stocks if s['change_pct'] < 0)
+flat = sum(1 for s in stocks if s['change_pct'] == 0)
+lines = []
+buy_stocks = [s for s in stocks if s.get('signal') == 'buy']
+if buy_stocks:
+    lines.append('📈 建议买入:')
+    for s in buy_stocks[:5]:
+        lines.append(f\"  {s['symbol']} {s.get('name','')} {s['change_pct']:+.2f}%\")
+sell_stocks = [s for s in stocks if s.get('signal') == 'sell']
+if sell_stocks:
+    lines.append('📉 建议卖出:')
+    for s in sell_stocks[:5]:
+        lines.append(f\"  {s['symbol']} {s.get('name','')} {s['change_pct']:+.2f}%\")
+sectors = {}
+for s in stocks:
+    sec = s.get('sector', '其他')
+    if sec not in sectors:
+        sectors[sec] = {'count': 0, 'total_change': 0}
+    sectors[sec]['count'] += 1
+    sectors[sec]['total_change'] += s['change_pct']
+if sectors:
+    lines.append('📊 行业表现:')
+    for sec, info in sorted(sectors.items()):
+        avg = info['total_change'] / info['count']
+        lines.append(f\"  {sec}: {info['count']}只 | {avg:+.2f}%\")
+lines.append(f'📋 共{len(stocks)}只 | 涨{up} 跌{down} 平{flat}')
+lines.append(f'详情 → \${{ github.server_url }}/\${{ github.repository }}')
+print('||'.join(lines))
+          ")
+          TITLE="【美股晨报】$(date +%Y-%m-%d)"
+          curl -s -X POST "http://www.pushplus.plus/send" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"${PUSHPLUS_TOKEN}\",\"title\":\"${TITLE}\",\"content\":\"${STOCKS//\"/\\\"}\"}"

@@ -201,6 +201,133 @@ const Indicators = {
     return k > d;
   },
 
+  /**
+   * Get KDJ signal interpretation text for card display.
+   * Returns { text, cssClass, hasGoldenCross, hasDeathCross }
+   */
+  getKDJSignalText(k, d, j) {
+    const parts = [];
+    let cssClass = 'kdj-normal';
+
+    // Overbought / Oversold detection (primary signal)
+    const isOversold = d < 20 && j < 0;
+    const isOverbought = d > 80 && j > 100;
+    const isGoldenCross = k > d;
+    const isDeathCross = k < d;
+
+    if (isOversold) {
+      parts.push('🔴 超卖（潜在买点）');
+      cssClass = 'kdj-oversold';
+    } else if (isOverbought) {
+      parts.push('🟢 超买（潜在卖点）');
+      cssClass = 'kdj-overbought';
+    } else {
+      // Normal range
+      if (k < 30) { parts.push('KDJ 偏低'); cssClass = 'kdj-low'; }
+      else if (k > 70) { parts.push('KDJ 偏高'); cssClass = 'kdj-high'; }
+      else { parts.push('KDJ 正常'); }
+    }
+
+    // Cross signals (can coexist with overbought/oversold)
+    if (isGoldenCross) {
+      parts.push('✨ 金叉');
+      if (cssClass === 'kdj-normal' || cssClass === 'kdj-low') cssClass = 'kdj-golden';
+    } else if (isDeathCross) {
+      parts.push('💀 死叉');
+      if (cssClass === 'kdj-normal' || cssClass === 'kdj-high') cssClass = 'kdj-death';
+    }
+
+    return {
+      text: parts.join(' · '),
+      cssClass: cssClass,
+      isOversold: isOversold,
+      isOverbought: isOverbought,
+      hasGoldenCross: isGoldenCross,
+      hasDeathCross: isDeathCross
+    };
+  },
+
+  /**
+   * Determine market phase: 右侧 (uptrend), 左侧 (downtrend), or 震荡 (ranging).
+   * Returns { phase, cssClass, label }
+   */
+  getMarketPhase(stock) {
+    const { close, ma5, ma20, k } = stock;
+    const aboveMA20 = close > ma20;
+    const ma5AboveMA20 = ma5 > ma20;
+    const kAbove50 = k > 50;
+
+    if (aboveMA20 && ma5AboveMA20 && kAbove50) {
+      return { phase: 'right', cssClass: 'phase-right', label: '右侧' };
+    } else if (!aboveMA20 && !ma5AboveMA20 && !kAbove50) {
+      return { phase: 'left', cssClass: 'phase-left', label: '左侧' };
+    } else {
+      return { phase: 'ranging', cssClass: 'phase-ranging', label: '震荡' };
+    }
+  },
+
+  /**
+   * Simplified right-side indicator analysis based on available snapshot data.
+   * Uses fixed experience parameters (L=-3%, U=+1%) when historical data is unavailable.
+   * Returns a structured analysis object.
+   */
+  analyzeRightSide(stock) {
+    const { close, ma20, ma5, change_pct } = stock;
+    if (!ma20) return null;
+
+    // MA20 trend assessment (approximation from available data)
+    const ma20Slope = ma5 && ma20 ? ((ma5 - ma20) / ma20 * 100) : 0;
+    let trendDirection, trendStrength;
+    if (ma20Slope > 0.5) { trendDirection = '上升'; trendStrength = '强'; }
+    else if (ma20Slope > 0.1) { trendDirection = '温和上升'; trendStrength = '中'; }
+    else if (ma20Slope > -0.1) { trendDirection = '走平'; trendStrength = '弱'; }
+    else if (ma20Slope > -0.5) { trendDirection = '温和下降'; trendStrength = '中'; }
+    else { trendDirection = '下降'; trendStrength = '强'; }
+
+    // Current deviation from MA20
+    const deviation = ((close - ma20) / ma20 * 100);
+
+    // Experience-based parameters (L=-3%, U=+1%)
+    const L = -3;  // historical deepest callback
+    const U = 1;   // historical shallowest callback
+
+    // Buy zone calculation
+    const lowerPrice = ma20 * (1 + L / 100);   // B1
+    const midPrice = ma20;                       // B2 = MA20 line
+    const upperPrice = ma20 * (1 + U / 100);    // B3
+
+    // Stop loss price
+    const stopLoss = lowerPrice * 0.98;
+
+    // Applicability check
+    const isApplicable = ma20Slope > 0; // MA20 must be trending up for right-side trading
+
+    return {
+      trendDirection: trendDirection,
+      trendStrength: trendStrength,
+      ma20Slope: ma20Slope,
+      deviation: deviation,
+      deviationPct: deviation.toFixed(2),
+      L: L,
+      U: U,
+      lowerPrice: lowerPrice,
+      midPrice: midPrice,
+      upperPrice: upperPrice,
+      stopLoss: stopLoss,
+      isApplicable: isApplicable,
+      // Buy point status
+      buyPoints: [
+        { name: 'B1 试探买点', price: lowerPrice, ratio: '20%', desc: '股价触及历史回调下限' },
+        { name: 'B2 标准买点', price: midPrice, ratio: '30%', desc: '股价回调至20日均线' },
+        { name: 'B3 确认买点', price: upperPrice, ratio: '50%', desc: '股价触及回调上限+企稳信号' }
+      ],
+      currentPriceRelative: deviation > U ? '高于买入区间上限' :
+                           deviation < L ? '低于买入区间下限（不建议买入）' :
+                           deviation > 0 ? '在B2-B3区间' :
+                           deviation > -1 ? '在B1-B2区间' : '接近B1买点'
+    };
+  },
+
   /** Format date string */
   formatDate(d) {
     const dt = new Date(d);
