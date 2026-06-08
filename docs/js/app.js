@@ -35,15 +35,19 @@ const App = {
   async fetchData(forceRefresh = false) {
     try {
       const ts = Date.now();
-      var baseUrl = this.getDataUrl();
-      const url = forceRefresh
-        ? baseUrl + '?t=' + ts
-        : baseUrl;
-      var resp = await fetch(url);
-      // Fallback: if remote fetch fails on localhost, try local file
-      if (!resp.ok && baseUrl !== 'data/stocks.json') {
-        console.warn('Remote data fetch failed, falling back to local');
+      var isLocalhost = this.isLocalhost();
+      var resp;
+      if (isLocalhost) {
+        // Local dev: try local file first (fresh from fetch_data.py), fallback to GitHub
         resp = await fetch('data/stocks.json?t=' + ts);
+        if (!resp.ok) {
+          console.warn('Local file unavailable, fetching from GitHub');
+          resp = await fetch('https://raw.githubusercontent.com/wuming0068-spec/us-stocks/master/docs/data/stocks.json?t=' + ts);
+        }
+      } else {
+        // GitHub Pages: load from deployed data file
+        const url = forceRefresh ? 'data/stocks.json?t=' + ts : 'data/stocks.json';
+        resp = await fetch(url);
       }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const json = await resp.json();
@@ -221,12 +225,9 @@ const App = {
   },
 
   /** Resolve data URL: use GitHub raw when on localhost to keep data synced */
-  getDataUrl() {
+  isLocalhost() {
     var host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.startsWith('192.168.') || host.startsWith('10.')) {
-      return 'https://raw.githubusercontent.com/wuming0068-spec/us-stocks/master/docs/data/stocks.json';
-    }
-    return 'data/stocks.json';
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.startsWith('192.168.') || host.startsWith('10.');
   },
 
   /** Get unique sorted list of industries from watchlist */
@@ -409,7 +410,7 @@ App.updateStatusBar = function() {
   if (sourceEl) {
     var host = window.location.hostname;
     var isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-    sourceEl.textContent = isLocal ? ' 🌐 同步自GitHub' : '';
+    sourceEl.textContent = isLocal ? ' 📁 本地数据' : '';
   }
   this.$('#refresh-count').textContent = '剩' + this.refreshCount + '次';
 };
