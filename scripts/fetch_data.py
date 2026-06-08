@@ -701,11 +701,32 @@ class DataFetcher:
 
     # ----- Main runner -----
     def run(self, symbols: list[str] | None = None):
-        """Main pipeline: fetch all → save history → generate snapshot."""
+        """Main pipeline: fetch all → save history → generate snapshot.
+
+        Preserves all existing stocks in the snapshot — only updates the
+        ones that were successfully fetched.  This makes --symbol mode safe.
+        """
         if symbols is None:
             symbols = self.load_watchlist()
 
+        # Load ALL existing stocks so we never drop data for stocks
+        # that weren't in the current fetch set
+        existing = load_json(STOCKS_FILE, {"stocks": []})
+        existing_map = {}
+        for s in existing.get("stocks", []):
+            existing_map[s.get("symbol", "").upper()] = s
+
+        # Pre-populate all_data with every existing stock (df=None means
+        # generate_snapshot will reuse the old snapshot entry verbatim)
         all_data = {}
+        for sym, s in existing_map.items():
+            all_data[sym] = {
+                "df": None,
+                "name": s.get("name", sym),
+                "sector": s.get("sector", "其他"),
+                "market_cap": s.get("market_cap", 0),
+            }
+
         success = 0
         fail = 0
 
@@ -719,28 +740,16 @@ class DataFetcher:
                 df = self.compute_indicators(df)
                 self.save_history(sym, df)
 
-                # Get metadata from existing
-                existing = load_json(STOCKS_FILE, {"stocks": []})
-                existing_map = {}
-                for s in existing.get("stocks", []):
-                    existing_map[s.get("symbol", "").upper()] = s
-                old = existing_map.get(sym, {})
-
                 info = {
                     "df": df,
-                    "name": old.get("name", sym),
-                    "sector": old.get("sector", "其他"),
-                    "market_cap": old.get("market_cap", 0),
+                    "name": existing_map.get(sym, {}).get("name", sym),
+                    "sector": existing_map.get(sym, {}).get("sector", "其他"),
+                    "market_cap": existing_map.get(sym, {}).get("market_cap", 0),
                 }
-                all_data[sym] = info
+                all_data[sym] = info  # overwrite the placeholder
                 success += 1
             else:
-                # Keep existing snapshot data if available
-                existing = load_json(STOCKS_FILE, {"stocks": []})
-                for s in existing.get("stocks", []):
-                    if s.get("symbol", "").upper() == sym:
-                        all_data[sym] = {"df": None, "name": s.get("name"), "sector": s.get("sector"), "market_cap": s.get("market_cap")}
-                        break
+                # all_data already has the placeholder from pre-population
                 fail += 1
 
         log.info(f"Fetch complete: {success} OK, {fail} failed")

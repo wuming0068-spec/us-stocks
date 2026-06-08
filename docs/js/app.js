@@ -21,6 +21,7 @@ const App = {
     this.loadIndustries();
     this.loadRefreshCount();
     await this.fetchData();
+    this.syncWatchlist();
     this.bindEvents();
     this.render();
     this.renderSidebar();
@@ -34,10 +35,16 @@ const App = {
   async fetchData(forceRefresh = false) {
     try {
       const ts = Date.now();
+      var baseUrl = this.getDataUrl();
       const url = forceRefresh
-        ? 'data/stocks.json?t=' + ts
-        : 'data/stocks.json';
-      const resp = await fetch(url);
+        ? baseUrl + '?t=' + ts
+        : baseUrl;
+      var resp = await fetch(url);
+      // Fallback: if remote fetch fails on localhost, try local file
+      if (!resp.ok && baseUrl !== 'data/stocks.json') {
+        console.warn('Remote data fetch failed, falling back to local');
+        resp = await fetch('data/stocks.json?t=' + ts);
+      }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const json = await resp.json();
       this.allStocks = json.stocks || [];
@@ -66,7 +73,7 @@ const App = {
     }
   },
 
-  /** Load watchlist from localStorage. If empty, seed with sample stocks. */
+  /** Load watchlist from localStorage. Seed from stocks.json data on first visit. */
   loadWatchlist() {
     try {
       var raw = localStorage.getItem('us_watchlist');
@@ -74,12 +81,29 @@ const App = {
     } catch(e) {
       this.watchlist = [];
     }
-    // Seed with defaults on first visit
+  },
+
+  /** Sync watchlist with stocks.json data symbols.
+   *  On first visit (empty watchlist): populate all symbols from data.
+   *  On subsequent visits: auto-add any new symbols found in data file. */
+  syncWatchlist() {
+    var self = this;
+    if (!this.allStocks || this.allStocks.length === 0) return;
+    // First visit: populate from data file
     if (this.watchlist.length === 0) {
-      this.watchlist = ['AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'TSLA',
-                        'META', 'JPM', 'BAC', 'GS', 'JNJ', 'PFE', 'UNH', 'NEE', 'XOM'];
+      this.watchlist = this.allStocks.map(function(s) { return s.symbol; });
       this.saveWatchlist();
+      return;
     }
+    // Auto-add any new stocks that appear in the data file (e.g. added on GitHub)
+    var changed = false;
+    this.allStocks.forEach(function(s) {
+      if (self.watchlist.indexOf(s.symbol) === -1) {
+        self.watchlist.push(s.symbol);
+        changed = true;
+      }
+    });
+    if (changed) this.saveWatchlist();
   },
 
   saveWatchlist() {
@@ -194,6 +218,15 @@ const App = {
       });
     });
     return groups;
+  },
+
+  /** Resolve data URL: use GitHub raw when on localhost to keep data synced */
+  getDataUrl() {
+    var host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.startsWith('192.168.') || host.startsWith('10.')) {
+      return 'https://raw.githubusercontent.com/wuming0068-spec/us-stocks/master/docs/data/stocks.json';
+    }
+    return 'data/stocks.json';
   },
 
   /** Get unique sorted list of industries from watchlist */
@@ -370,6 +403,13 @@ App.updateStatusBar = function() {
     el.textContent = dateStr + ' ' + timeStr;
   } else {
     el.textContent = '暂无数据';
+  }
+  // Show data source indicator on localhost
+  var sourceEl = this.$('#data-source');
+  if (sourceEl) {
+    var host = window.location.hostname;
+    var isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    sourceEl.textContent = isLocal ? ' 🌐 同步自GitHub' : '';
   }
   this.$('#refresh-count').textContent = '剩' + this.refreshCount + '次';
 };

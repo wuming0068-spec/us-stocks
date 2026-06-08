@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>美股自选监控</title>
-<link rel="stylesheet" href="css/app.css?v=2">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a1a2e'/><text y='26' font-size='24'>📈</text></svg>">
+<link rel="stylesheet" href="css/app.css?v=3">
 </head>
 <body>
 
@@ -43,7 +44,7 @@
     </div>
   </div>
   <div id="data-status" class="status-bar">
-    📡 数据更新: <span id="update-time">加载中...</span> (基于前一日收盘数据)
+    📡 数据更新: <span id="update-time">加载中...</span> (基于前一日收盘数据)<span id="data-source"></span>
   </div>
 </header>
 
@@ -149,6 +150,6 @@
 <div id="toast-container"></div>
 
 <script src="js/indicators.js?v=2"></script>
-<script src="js/app.js?v=2"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

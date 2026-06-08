@@ -476,9 +476,9 @@ body {
   gap: 8px;
 }
 
-.stock-row-left { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.stock-row-symbol { font-weight: 700; font-size: 0.85rem; }
-.stock-row-name { color: var(--color-text-secondary); font-size: 0.7rem; }
+.stock-row-left { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.stock-row-symbol { font-weight: 700; font-size: 0.85rem; white-space: nowrap; flex-shrink: 0; }
+.stock-row-name { color: var(--color-text-secondary); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .stock-row-right {
   display: flex;
@@ -486,8 +486,8 @@ body {
   gap: 8px;
 }
 
-.stock-row-price { font-weight: 600; font-size: 0.85rem; font-family: var(--font-mono); }
-.stock-row-change { font-weight: 600; font-size: 0.78rem; font-family: var(--font-mono); }
+.stock-row-price { font-weight: 600; font-size: 0.85rem; font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
+.stock-row-change { font-weight: 600; font-size: 0.78rem; font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
 .stock-row-change.up { color: var(--color-success); }
 .stock-row-change.down { color: var(--color-danger); }
 
