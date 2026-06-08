@@ -517,10 +517,10 @@ App.stockRowHTML = function(stock) {
         '<div class="stock-row-left">' +
           '<span class="stock-row-symbol">' + stock.symbol + '</span>' +
           '<span class="stock-row-name">' + (stock.name || '') + '</span>' +
-        '</div>' +
-        '<div class="stock-row-right">' +
           '<span class="stock-row-price">$' + Indicators.formatPrice(stock.close) + '</span>' +
           '<span class="stock-row-change ' + chgClass + '">' + Indicators.formatChange(stock.change_pct) + '</span>' +
+        '</div>' +
+        '<div class="stock-row-right">' +
           phaseBadge +
           signalBadge +
         '</div>' +
