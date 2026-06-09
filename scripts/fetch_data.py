@@ -71,6 +71,33 @@ def fmt_price(p) -> str:
 
 
 # ---------------------------------------------------------------------------
+# CircuitBreaker — skip dead sources after N consecutive failures
+# ---------------------------------------------------------------------------
+
+class CircuitBreaker:
+    """Per-source health tracker. After *threshold* consecutive failures,
+    the source is marked 'dead' and skipped for the rest of the run.
+    A single success resets the counter."""
+
+    def __init__(self, threshold: int = 3):
+        self.threshold = threshold
+        self._failures: dict[str, int] = {}
+        self._dead: set[str] = set()
+
+    def fail(self, source: str):
+        self._failures[source] = self._failures.get(source, 0) + 1
+        if self._failures[source] >= self.threshold:
+            self._dead.add(source)
+
+    def ok(self, source: str):
+        self._failures[source] = 0
+        self._dead.discard(source)
+
+    def dead(self, source: str) -> bool:
+        return source in self._dead
+
+
+# ---------------------------------------------------------------------------
 # DataFetcher
 # ---------------------------------------------------------------------------
 
@@ -81,6 +108,7 @@ class DataFetcher:
         self.start_date = (datetime.now() - timedelta(days=history_days * 2)).strftime("%Y%m%d")
         self.akshare_ok = False
         self.efinance_ok = False
+        self.cb = CircuitBreaker(threshold=2)
         self._init_akshare()
         self._init_efinance()
 
@@ -141,6 +169,8 @@ class DataFetcher:
         """Fetch historical daily data via AKShare (新浪/东财, 国内直连)."""
         if not self.akshare_ok or self.ak is None:
             return None
+        if self.cb.dead("akshare"):
+            return None
 
         for attempt in range(3):
             try:
@@ -176,12 +206,14 @@ class DataFetcher:
                 df = df.tail(self.history_days)
 
                 log.info(f"  akshare OK: {len(df)} rows for {symbol}")
+                self.cb.ok("akshare")
                 return df
 
             except Exception as e:
                 log.warning(f"  akshare attempt {attempt + 1} failed: {type(e).__name__}: {e}")
                 time.sleep(3)
 
+        self.cb.fail("akshare")
         return None
 
     # ----- efinance fetch -----
@@ -190,6 +222,8 @@ class DataFetcher:
         Returns DataFrame with columns: Date, Open, High, Low, Close, Volume
         """
         if not self.efinance_ok or self.ef is None:
+            return None
+        if self.cb.dead("efinance"):
             return None
 
         for attempt in range(3):
@@ -228,17 +262,21 @@ class DataFetcher:
                 df = df.tail(self.history_days)
 
                 log.info(f"  efinance OK: {len(df)} rows for {symbol}")
+                self.cb.ok("efinance")
                 return df
 
             except Exception as e:
                 log.warning(f"  efinance attempt {attempt + 1} failed: {type(e).__name__}: {e}")
                 time.sleep(2)
 
+        self.cb.fail("efinance")
         return None
 
     # ----- yfinance fallback -----
     def fetch_with_yfinance(self, symbol: str) -> pd.DataFrame | None:
         """Fallback: use yfinance library to get Yahoo Finance data."""
+        if self.cb.dead("yfinance"):
+            return None
         try:
             import yfinance as yf
         except ImportError:
@@ -251,6 +289,7 @@ class DataFetcher:
             df = ticker.history(period=f"{self.history_days * 2}d")
             if df is None or len(df) == 0:
                 log.warning(f"  yfinance returned empty for {symbol}")
+                self.cb.fail("yfinance")
                 return None
 
             # Normalize
@@ -260,6 +299,7 @@ class DataFetcher:
                 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume',
             })
             if 'Date' not in df.columns:
+                self.cb.fail("yfinance")
                 return None
 
             df['Date'] = pd.to_datetime(df['Date'])
@@ -275,10 +315,12 @@ class DataFetcher:
             df = df.tail(self.history_days)
 
             log.info(f"  yfinance OK: {len(df)} rows for {symbol}")
+            self.cb.ok("yfinance")
             return df
 
         except Exception as e:
             log.warning(f"  yfinance failed for {symbol}: {type(e).__name__}: {e}")
+            self.cb.fail("yfinance")
             return None
 
     # ----- Playwright / Yahoo Finance fallback -----
@@ -446,37 +488,80 @@ class DataFetcher:
             log.error(f"  Playwright failed for {symbol}: {type(e).__name__}: {e}")
             return None
 
-    # ----- Unified fetch -----
-    def fetch_stock(self, symbol: str) -> pd.DataFrame | None:
-        """Fetch data for a single stock. Returns DataFrame or None.
-        Chain: akshare → efinance → yfinance → Playwright
-        """
-        log.info(f"Fetching {symbol} ...")
+    # ----- Batch Playwright (browser reuse + concurrency) -----
+    def _fetch_one_playwright(self, symbol: str) -> pd.DataFrame | None:
+        """Fetch one symbol via Playwright. Used standalone or from thread pool."""
+        return self.fetch_with_playwright(symbol)
 
-        # 1. Try AKShare (国内直连, most reliable in China)
+    def fetch_playwright_batch(self, symbols: list[str], concurrency: int = 4) -> dict[str, pd.DataFrame | None]:
+        """Fetch multiple symbols via Playwright using a thread pool.
+        Each thread opens its own browser — avoids the overhead of sequential
+        browser launch/close while staying compatible with sync Playwright."""
+        results: dict[str, pd.DataFrame | None] = {}
+        if not symbols:
+            return results
+
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F811
+            sync_playwright()  # quick check that it's importable
+        except ImportError:
+            log.error("playwright not installed — cannot batch-fetch")
+            return {s: None for s in symbols}
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        log.info(f"Playwright batch: {len(symbols)} symbols (concurrency={concurrency})")
+
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(self._fetch_one_playwright, s): s for s in symbols}
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    results[sym] = future.result()
+                except Exception as e:
+                    log.error(f"  Playwright batch failed for {sym}: {e}")
+                    results[sym] = None
+
+        ok = sum(1 for v in results.values() if v is not None and len(v) >= 5)
+        log.info(f"Playwright batch done: {ok}/{len(symbols)} OK")
+        return results
+
+    # ----- Unified fetch (non-Playwright sources only) -----
+    def fetch_stock_quick(self, symbol: str) -> pd.DataFrame | None:
+        """Try fast sources only: akshare → efinance → yfinance.
+        Returns DataFrame or None (caller should fall back to Playwright)."""
         df = self.fetch_with_akshare(symbol)
         if df is not None and len(df) >= 5:
             return df
 
-        # 2. Try efinance (works on GitHub Actions runners)
-        log.info(f"  Switching to efinance fallback for {symbol}")
         df = self.fetch_with_efinance(symbol)
         if df is not None and len(df) >= 5:
             return df
 
-        # 3. Fallback to yfinance (lightweight Yahoo Finance API)
-        log.info(f"  Switching to yfinance fallback for {symbol}")
         df = self.fetch_with_yfinance(symbol)
         if df is not None and len(df) >= 5:
             return df
 
-        # 4. Fallback to Playwright (heavy but reliable)
+        return None
+
+    # ----- Unified fetch (all sources, backward-compatible) -----
+    def fetch_stock(self, symbol: str) -> pd.DataFrame | None:
+        """Fetch data for a single stock. Returns DataFrame or None.
+        Chain: akshare → efinance → yfinance → Playwright
+        Use fetch_stock_quick + fetch_playwright_batch in batch mode for speed."""
+        log.info(f"Fetching {symbol} ...")
+
+        df = self.fetch_stock_quick(symbol)
+        if df is not None:
+            return df
+
+        # Fallback to Playwright
         log.info(f"  Switching to Playwright fallback for {symbol}")
         df = self.fetch_with_playwright(symbol)
         if df is not None and len(df) >= 5:
             return df
 
-        log.error(f"  FAILED to fetch {symbol} via both methods")
+        log.error(f"  FAILED to fetch {symbol} via all methods")
         return None
 
     # ----- History persistence -----
@@ -701,10 +786,10 @@ class DataFetcher:
 
     # ----- Main runner -----
     def run(self, symbols: list[str] | None = None):
-        """Main pipeline: fetch all → save history → generate snapshot.
-
-        Preserves all existing stocks in the snapshot — only updates the
-        ones that were successfully fetched.  This makes --symbol mode safe.
+        """Two-phase pipeline:
+        Phase 1 — try akshare/efinance/yfinance for each stock (fast, with circuit breaker).
+        Phase 2 — batch-fetch remaining stocks via Playwright (browser reuse + concurrency).
+        Then save history and generate snapshot.
         """
         if symbols is None:
             symbols = self.load_watchlist()
@@ -729,30 +814,60 @@ class DataFetcher:
 
         success = 0
         fail = 0
+        need_playwright: list[str] = []
 
+        # ---- Phase 1: fast sources only ----
+        log.info(f"Phase 1: fast sources for {len(symbols)} symbols")
         for symbol in symbols:
             sym = symbol.strip().upper()
             if not sym:
                 continue
 
-            df = self.fetch_stock(sym)
+            log.info(f"Fetching {sym} ...")
+            df = self.fetch_stock_quick(sym)
             if df is not None and len(df) >= 5:
                 df = self.compute_indicators(df)
                 self.save_history(sym, df)
-
                 info = {
                     "df": df,
                     "name": existing_map.get(sym, {}).get("name", sym),
                     "sector": existing_map.get(sym, {}).get("sector", "其他"),
                     "market_cap": existing_map.get(sym, {}).get("market_cap", 0),
                 }
-                all_data[sym] = info  # overwrite the placeholder
+                all_data[sym] = info
                 success += 1
             else:
-                # all_data already has the placeholder from pre-population
-                fail += 1
+                need_playwright.append(sym)
 
-        log.info(f"Fetch complete: {success} OK, {fail} failed")
+        # ---- Phase 2: batch Playwright ----
+        if need_playwright:
+            log.info(f"Phase 2: Playwright batch for {len(need_playwright)} symbols")
+            pw_results = self.fetch_playwright_batch(need_playwright, concurrency=4)
+            for sym, df in pw_results.items():
+                if df is not None and len(df) >= 5:
+                    df = self.compute_indicators(df)
+                    self.save_history(sym, df)
+                    info = {
+                        "df": df,
+                        "name": existing_map.get(sym, {}).get("name", sym),
+                        "sector": existing_map.get(sym, {}).get("sector", "其他"),
+                        "market_cap": existing_map.get(sym, {}).get("market_cap", 0),
+                    }
+                    all_data[sym] = info
+                    success += 1
+                else:
+                    fail += 1
+        else:
+            # All stocks fetched in phase 1 — nothing to do
+            pass
+
+        # Fail count includes stocks that were never in the fetch set
+        fail += len([s for s in existing_map if s not in [x.strip().upper() for x in symbols]])
+
+        log.info(f"Fetch complete: {success} OK, {fail} failed (circuit-breaker: "
+                 f"akshare={'dead' if self.cb.dead('akshare') else 'alive'}, "
+                 f"efinance={'dead' if self.cb.dead('efinance') else 'alive'}, "
+                 f"yfinance={'dead' if self.cb.dead('yfinance') else 'alive'})")
 
         # Generate snapshot
         snapshot = self.generate_snapshot(all_data)
@@ -770,9 +885,26 @@ def main():
     parser = argparse.ArgumentParser(description="US Stocks Data Fetcher")
     parser.add_argument("--symbol", type=str, help="Fetch a single symbol only")
     parser.add_argument("--days", type=int, default=DEFAULT_HISTORY_DAYS, help="History depth in trading days")
+    parser.add_argument("--skip-akshare", action="store_true", help="Skip akshare (domestic CN source)")
+    parser.add_argument("--skip-efinance", action="store_true", help="Skip efinance (domestic CN source)")
+    parser.add_argument("--skip-yfinance", action="store_true", help="Skip yfinance (Yahoo API)")
     args = parser.parse_args()
 
     fetcher = DataFetcher(history_days=args.days)
+
+    # Pre-kill sources that were explicitly skipped
+    if args.skip_akshare:
+        fetcher.cb._failures["akshare"] = 999
+        fetcher.cb._dead.add("akshare")
+        log.info("akshare disabled via --skip-akshare")
+    if args.skip_efinance:
+        fetcher.cb._failures["efinance"] = 999
+        fetcher.cb._dead.add("efinance")
+        log.info("efinance disabled via --skip-efinance")
+    if args.skip_yfinance:
+        fetcher.cb._failures["yfinance"] = 999
+        fetcher.cb._dead.add("yfinance")
+        log.info("yfinance disabled via --skip-yfinance")
 
     if args.symbol:
         symbols = [args.symbol.strip().upper()]

@@ -99,15 +99,28 @@ const App = {
       this.saveWatchlist();
       return;
     }
-    // Auto-add any new stocks that appear in the data file (e.g. added on GitHub)
+    // Auto-add new stocks from data file, but skip stocks the user removed
+    var removed = this.getRemoved();
     var changed = false;
     this.allStocks.forEach(function(s) {
-      if (self.watchlist.indexOf(s.symbol) === -1) {
+      if (self.watchlist.indexOf(s.symbol) === -1 && removed.indexOf(s.symbol) === -1) {
         self.watchlist.push(s.symbol);
         changed = true;
       }
     });
     if (changed) this.saveWatchlist();
+  },
+
+  getRemoved() {
+    try {
+      return JSON.parse(localStorage.getItem('us_removed') || '[]');
+    } catch(e) { return []; }
+  },
+
+  saveRemoved(list) {
+    try {
+      localStorage.setItem('us_removed', JSON.stringify(list));
+    } catch(e) {}
   },
 
   saveWatchlist() {
@@ -282,7 +295,7 @@ App.renderSidebar = function() {
   // Update signal count badge
   var stocks = this.getFilteredStocks();
   var signalCount = stocks.filter(function(s) {
-    return s._signal && s._signal !== 'watch';
+    return s._signal === 'buy';
   }).length;
   var badge = this.$('#sidebar-signal-count');
   if (badge) {
@@ -415,31 +428,22 @@ App.updateStatusBar = function() {
   this.$('#refresh-count').textContent = '剩' + this.refreshCount + '次';
 };
 
-/** Render signal cards for buy/sell/watch stocks */
+/** Render signal cards for buy stocks only */
 App.renderSignals = function() {
   var stocks = this.getFilteredStocks();
 
-  // Collect all stocks that have signals
+  // Only show buy-signal stocks
   var buyStocks = [];
-  var sellStocks = [];
-  var watchStocks = [];
-
   stocks.forEach(function(s) {
     if (s._signal === 'buy') buyStocks.push(s);
-    else if (s._signal === 'sell') sellStocks.push(s);
-    else if (s._signal === 'watch') watchStocks.push(s);
   });
 
-  // Sort each group by market cap descending
-  var byMarketCap = function(a, b) {
+  // Sort by market cap descending
+  buyStocks.sort(function(a, b) {
     return (b.market_cap || 0) - (a.market_cap || 0);
-  };
-  buyStocks.sort(byMarketCap);
-  sellStocks.sort(byMarketCap);
-  watchStocks.sort(byMarketCap);
+  });
 
-  // Buy first, then sell, then watch
-  var allSignals = buyStocks.concat(sellStocks).concat(watchStocks);
+  var allSignals = buyStocks;
 
   var list = this.$('#signals-list');
   var empty = this.$('#signals-empty');
@@ -819,6 +823,13 @@ App.confirmAdd = function() {
     this.toast(symbol + ' 不在数据源中，但已添加到监控列表', 'info');
   }
   this.watchlist.unshift(symbol);
+  // Remove from "removed" list if previously deleted
+  var removed = this.getRemoved();
+  var idx = removed.indexOf(symbol);
+  if (idx !== -1) {
+    removed.splice(idx, 1);
+    this.saveRemoved(removed);
+  }
   // Save industry if provided
   if (industry) {
     this.setIndustry(symbol, industry);
@@ -836,6 +847,12 @@ App.removeStock = function(symbol) {
     return s !== symbol;
   });
   this.saveWatchlist();
+  // Remember removal so syncWatchlist won't re-add it
+  var removed = this.getRemoved();
+  if (removed.indexOf(symbol) === -1) {
+    removed.push(symbol);
+    this.saveRemoved(removed);
+  }
   this.render();
   this.renderSidebar();
   this.toast(symbol + ' 已从自选移除', 'info');
