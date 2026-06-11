@@ -8,6 +8,8 @@ const App = {
   allStocks: [],          // All stocks from stocks.json
   watchlist: [],          // User's selected symbols (from localStorage)
   stockIndustries: {},    // User-defined industries: { symbol: industry }
+  starredStocks: [],      // Starred/highlighted stock symbols (from localStorage)
+  showStarredOnly: false,  // When true, only show starred stocks
   filteredSymbols: null,  // Current search filter (null = show all)
   activeIndustry: null,   // Currently selected industry from sidebar (null = show all)
   refreshCount: 10,       // Remaining manual force-refresh count today
@@ -19,6 +21,7 @@ const App = {
   async init() {
     this.loadWatchlist();
     this.loadIndustries();
+    this.loadStarred();
     this.loadRefreshCount();
     await this.fetchData();
     this.syncWatchlist();
@@ -77,8 +80,14 @@ const App = {
     }
   },
 
-  /** Load watchlist from localStorage. Seed from stocks.json data on first visit. */
+  /** Load watchlist. On localhost: derive from stocks.json (source of truth).
+   *  On GitHub Pages: use localStorage with stocks.json as seed. */
   loadWatchlist() {
+    // On localhost, watchlist = all symbols in stocks.json (already loaded in allStocks)
+    if (this.isLocalhost()) {
+      this.watchlist = this.allStocks.map(function(s) { return s.symbol; });
+      return;
+    }
     try {
       var raw = localStorage.getItem('us_watchlist');
       this.watchlist = raw ? JSON.parse(raw) : [];
@@ -88,11 +97,16 @@ const App = {
   },
 
   /** Sync watchlist with stocks.json data symbols.
-   *  On first visit (empty watchlist): populate all symbols from data.
-   *  On subsequent visits: auto-add any new symbols found in data file. */
+   *  On localhost: always mirrors stocks.json exactly.
+   *  On GitHub Pages: seeds from data on first visit, auto-adds new symbols. */
   syncWatchlist() {
     var self = this;
     if (!this.allStocks || this.allStocks.length === 0) return;
+    // Localhost: watchlist IS stocks.json — always in sync
+    if (this.isLocalhost()) {
+      this.watchlist = this.allStocks.map(function(s) { return s.symbol; });
+      return;
+    }
     // First visit: populate from data file
     if (this.watchlist.length === 0) {
       this.watchlist = this.allStocks.map(function(s) { return s.symbol; });
@@ -149,16 +163,53 @@ const App = {
     }
   },
 
-  /** Get industry for a symbol: user-defined first, then stock data fallback */
+  /** Get industry for a symbol: user override first, then stocks.json sector, else 未分类 */
   getIndustry(symbol) {
     if (this.stockIndustries[symbol]) return this.stockIndustries[symbol];
-    // Fallback to stock data sector
+    // Fallback to sector from stocks.json
+    var stock = null;
     for (var i = 0; i < this.allStocks.length; i++) {
       if (this.allStocks[i].symbol === symbol) {
-        return this.allStocks[i].sector || '其他';
+        stock = this.allStocks[i];
+        break;
       }
     }
-    return '其他';
+    if (stock && stock.sector && stock.sector !== '其他') return stock.sector;
+    return '未分类';
+  },
+
+  /** Load starred stocks from localStorage */
+  loadStarred() {
+    try {
+      var raw = localStorage.getItem('us_starred');
+      this.starredStocks = raw ? JSON.parse(raw) : [];
+    } catch(e) {
+      this.starredStocks = [];
+    }
+  },
+
+  saveStarred() {
+    try {
+      localStorage.setItem('us_starred', JSON.stringify(this.starredStocks));
+    } catch(e) {
+      console.warn('Failed to save starred:', e);
+    }
+  },
+
+  /** Toggle star on a stock symbol */
+  toggleStar(symbol) {
+    var idx = this.starredStocks.indexOf(symbol);
+    if (idx === -1) {
+      this.starredStocks.push(symbol);
+    } else {
+      this.starredStocks.splice(idx, 1);
+    }
+    this.saveStarred();
+    this.render();
+  },
+
+  isStarred(symbol) {
+    return this.starredStocks.indexOf(symbol) !== -1;
   },
 
   /** Set industry for a symbol */
@@ -169,6 +220,10 @@ const App = {
       delete this.stockIndustries[symbol];
     }
     this.saveIndustries();
+    // Also sync to server if on localhost
+    if (this.isLocalhost()) {
+      this.serverAPI('set-industry', { symbol: symbol, industry: industry || '' });
+    }
   },
 
   loadRefreshCount() {
@@ -212,6 +267,11 @@ const App = {
         return self.getIndustry(s.symbol) === self.activeIndustry;
       });
     }
+    if (this.showStarredOnly) {
+      list = list.filter(function(s) {
+        return self.starredStocks.indexOf(s.symbol) !== -1;
+      });
+    }
     return list;
   },
 
@@ -241,6 +301,27 @@ const App = {
   isLocalhost() {
     var host = window.location.hostname;
     return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.startsWith('192.168.') || host.startsWith('10.');
+  },
+
+  /** Call local server API. Returns response JSON or null on failure. */
+  async serverAPI(endpoint, data) {
+    if (!this.isLocalhost()) return null;
+    try {
+      var resp = await fetch('/api/' + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data || {})
+      });
+      if (!resp.ok) {
+        var err = await resp.json().catch(function() { return { error: 'HTTP ' + resp.status }; });
+        console.warn('API ' + endpoint + ' failed:', err.error);
+        return null;
+      }
+      return await resp.json();
+    } catch(e) {
+      console.warn('API ' + endpoint + ' unreachable:', e.message);
+      return null;
+    }
   },
 
   /** Get unique sorted list of industries from watchlist */
@@ -310,10 +391,20 @@ App.renderSidebar = function() {
   // Update active state on signals nav item
   var signalsItem = document.querySelector('.sidebar-item[data-nav="signals"]');
   if (signalsItem) {
-    if (this.activeIndustry === null) {
+    if (this.activeIndustry === null && !this.showStarredOnly) {
       signalsItem.classList.add('active');
     } else {
       signalsItem.classList.remove('active');
+    }
+  }
+
+  // Update active state on starred nav item
+  var starredItem = document.querySelector('.sidebar-item[data-nav="starred"]');
+  if (starredItem) {
+    if (this.showStarredOnly) {
+      starredItem.classList.add('active');
+    } else {
+      starredItem.classList.remove('active');
     }
   }
 
@@ -322,6 +413,7 @@ App.renderSidebar = function() {
   items.forEach(function(item) {
     item.addEventListener('click', function() {
       var ind = item.getAttribute('data-industry');
+      self.showStarredOnly = false;
       if (self.activeIndustry === ind) {
         // Deselect: show all
         self.activeIndustry = null;
@@ -335,14 +427,18 @@ App.renderSidebar = function() {
     });
   });
 
-  // Bind click on signals nav item
-  if (signalsItem) {
-    signalsItem.addEventListener('click', function() {
-      self.activeIndustry = null;
-      self.renderSidebar();
-      self.render();
-      self.$('#signals-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+  // Note: signals and starred nav clicks are bound once in bindEvents
+
+  // Update starred count badge
+  var starredCount = this.starredStocks.length;
+  var starredBadge = this.$('#sidebar-starred-count');
+  if (starredBadge) {
+    if (starredCount > 0) {
+      starredBadge.textContent = starredCount;
+      starredBadge.classList.remove('hidden');
+    } else {
+      starredBadge.classList.add('hidden');
+    }
   }
 };
 
@@ -458,11 +554,13 @@ App.renderSignals = function() {
   var self = this;
   allSignals.forEach(function(stock) {
     var card = document.createElement('div');
-    card.className = 'signal-card ' + (stock._signal || '');
+    card.className = 'signal-card ' + (stock._signal || '') + (self.isStarred(stock.symbol) ? ' starred' : '');
     var phase = Indicators.getMarketPhase(stock);
+    var starred = self.isStarred(stock.symbol);
     card.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;">' +
         '<div class="signal-info">' +
+          '<span class="stock-star-btn' + (starred ? ' star-active' : '') + '" data-star-symbol="' + stock.symbol + '">' + (starred ? '⭐' : '☆') + '</span>' +
           '<span class="signal-symbol">' + stock.symbol + '</span>' +
           '<span class="signal-name">' + (stock.name || '') + '</span>' +
           '<span class="signal-change ' + Indicators.changeClass(stock.change_pct) + '">' +
@@ -477,9 +575,19 @@ App.renderSignals = function() {
       '<div class="signal-indicators">' + self.indicatorRowHTML(stock) + '</div>';
 
     (function(sym) {
-      card.addEventListener('click', function() {
+      card.addEventListener('click', function(e) {
+        // Don't trigger if star button was clicked
+        if (e.target.closest('.stock-star-btn')) return;
         self.scrollToStock(sym);
       });
+      // Bind star toggle within signal card
+      var starBtn = card.querySelector('.stock-star-btn');
+      if (starBtn) {
+        starBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          self.toggleStar(sym);
+        });
+      }
     })(stock.symbol);
 
     list.appendChild(card);
@@ -541,8 +649,19 @@ App.renderIndustries = function() {
   // Attach stock row click events for detail expansion
   this.$$('.stock-row').forEach(function(row) {
     row.addEventListener('click', function(e) {
+      // Don't toggle detail if star button was clicked
+      if (e.target.closest('.stock-star-btn')) return;
       var symbol = row.getAttribute('data-symbol');
       self.toggleDetail(symbol, row);
+    });
+  });
+
+  // Attach star toggle events
+  this.$$('.stock-star-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var symbol = btn.getAttribute('data-star-symbol');
+      self.toggleStar(symbol);
     });
   });
 };
@@ -556,9 +675,12 @@ App.stockRowHTML = function(stock) {
   var phase = Indicators.getMarketPhase(stock);
   var phaseBadge = '<span class="stock-row-phase ' + phase.cssClass + '">' + phase.label + '</span>';
   var indRow = this.indicatorRowHTML(stock);
+  var starred = this.isStarred(stock.symbol);
+  var starClass = starred ? ' star-active' : '';
   return (
-    '<div class="stock-row" data-symbol="' + stock.symbol + '">' +
+    '<div class="stock-row' + (starred ? ' starred' : '') + '" data-symbol="' + stock.symbol + '">' +
       '<div class="stock-row-main">' +
+        '<span class="stock-star-btn' + starClass + '" data-star-symbol="' + stock.symbol + '">' + (starred ? '⭐' : '☆') + '</span>' +
         '<div class="stock-row-left">' +
           '<span class="stock-row-symbol">' + stock.symbol + '</span>' +
           '<span class="stock-row-name">' + (stock.name || '') + '</span>' +
@@ -594,6 +716,8 @@ App.toggleDetail = function(symbol, rowEl) {
   for (var i = 0; i < allOpen.length; i++) {
     allOpen[i].classList.remove('open');
   }
+  // Destroy chart when closing
+  ChartManager.destroy();
 
   if (!isOpen) {
     // Build detail content
@@ -634,6 +758,7 @@ App.toggleDetail = function(symbol, rowEl) {
     var rightSide = Indicators.analyzeRightSide(stock);
 
     card.innerHTML =
+      '<div class="detail-card-left">' +
       // Price row
       '<div class="detail-price-row">' +
         '<div class="detail-header">' +
@@ -659,7 +784,7 @@ App.toggleDetail = function(symbol, rowEl) {
         '<div class="metric"><span class="metric-label">成交均价</span><span class="metric-value">$' + Indicators.formatPrice(stock.vwap) + '</span></div>' +
         '<div class="metric"><span class="metric-label">数据日期</span><span class="metric-value">' + (this.dataDate || '-') + '</span></div>' +
       '</div>' +
-      // MA row (compact stats)
+      // MA row
       '<div class="detail-ma-row">' +
         '<span class="ma-item">MA5 <strong>$' + Indicators.formatPrice(stock.ma5) + '</strong></span>' +
         '<span class="ma-desc' + maDescClass + '">' +
@@ -670,7 +795,7 @@ App.toggleDetail = function(symbol, rowEl) {
           (ma.alignment === '多头排列' ? '⬆ 多头排列' : (ma.alignment === '空头排列' ? '⬇ 空头排列' : ma.alignment)) +
         '</span>' +
       '</div>' +
-      // KDJ row (signal interpretation, no raw values)
+      // KDJ row
       '<div class="detail-kdj-row">' +
         '<span class="kdj-label">KDJ</span>' +
         '<span class="kdj-item k-val' + kOverClass + '">K: ' + stock.k.toFixed(1) + '</span>' +
@@ -740,9 +865,20 @@ App.toggleDetail = function(symbol, rowEl) {
           '<div class="analysis-title">📝 综合总结</div>' +
           '<div class="analysis-body">' + summary + '</div>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+      '</div>' +  // .detail-card-left
+      '<div class="detail-card-right" id="chart-area-' + stock.symbol + '">' +
+        '<div style="padding:20px;text-align:center;color:#999;font-size:0.8rem;">加载图表中...</div>' +
+      '</div>';  // .detail-card-right
 
     wrapEl.classList.add('open');
+
+    // Render charts in the right column
+    var chartContainer = document.getElementById('chart-area-' + stock.symbol);
+    if (chartContainer) {
+      ChartManager.render(chartContainer, stock.symbol);
+    }
+
     // Scroll into view smoothly
     var el = wrapEl;
     setTimeout(function() {
@@ -800,7 +936,7 @@ App.hideAddForm = function() {
   this.$('#add-industry').value = '';
 };
 
-App.confirmAdd = function() {
+App.confirmAdd = async function() {
   var symbol = this.$('#add-symbol').value.trim().toUpperCase();
   var industry = this.$('#add-industry').value.trim();
   if (!symbol) {
@@ -811,26 +947,37 @@ App.confirmAdd = function() {
     this.toast(symbol + ' 已经在自选列表中', 'info');
     return;
   }
-  // Check if symbol exists in our data
-  var exists = false;
-  for (var i = 0; i < this.allStocks.length; i++) {
-    if (this.allStocks[i].symbol === symbol) {
-      exists = true;
-      break;
+
+  // Localhost: add via server API → writes stocks.json → refresh
+  if (this.isLocalhost()) {
+    this.toast('正在添加 ' + symbol + ' ...', 'info');
+    var result = await this.serverAPI('add', { symbol: symbol, industry: industry });
+    if (result && result.ok) {
+      this.hideAddForm();
+      if (industry) { this.setIndustry(symbol, industry); }
+      await this.fetchData(true);
+      this.syncWatchlist();
+      this.render();
+      this.renderSidebar();
+      if (result.fetched) {
+        this.toast(symbol + ' 已添加并获取数据', 'success');
+      } else {
+        this.toast(symbol + ' 已添加（数据获取失败，请稍后刷新）', 'info');
+      }
+    } else {
+      this.toast(symbol + ' 添加失败，请检查服务器', 'error');
     }
+    return;
   }
-  if (!exists) {
-    this.toast(symbol + ' 不在数据源中，但已添加到监控列表', 'info');
-  }
+
+  // GitHub Pages: localStorage only
   this.watchlist.unshift(symbol);
-  // Remove from "removed" list if previously deleted
   var removed = this.getRemoved();
   var idx = removed.indexOf(symbol);
   if (idx !== -1) {
     removed.splice(idx, 1);
     this.saveRemoved(removed);
   }
-  // Save industry if provided
   if (industry) {
     this.setIndustry(symbol, industry);
   }
@@ -842,12 +989,27 @@ App.confirmAdd = function() {
 };
 
 // === Remove Stock ===
-App.removeStock = function(symbol) {
+App.removeStock = async function(symbol) {
+  // Localhost: remove via server API
+  if (this.isLocalhost()) {
+    var result = await this.serverAPI('remove', { symbol: symbol });
+    if (result && result.ok) {
+      await this.fetchData(true);
+      this.syncWatchlist();
+      this.render();
+      this.renderSidebar();
+      this.toast(symbol + ' 已从自选移除', 'info');
+    } else {
+      this.toast(symbol + ' 移除失败', 'error');
+    }
+    return;
+  }
+
+  // GitHub Pages: localStorage only
   this.watchlist = this.watchlist.filter(function(s) {
     return s !== symbol;
   });
   this.saveWatchlist();
-  // Remember removal so syncWatchlist won't re-add it
   var removed = this.getRemoved();
   if (removed.indexOf(symbol) === -1) {
     removed.push(symbol);
@@ -950,25 +1112,51 @@ App.showManageModal = function() {
   });
 
   // Batch add
-  overlay.querySelector('.btn-batch-add').addEventListener('click', function() {
+  overlay.querySelector('.btn-batch-add').addEventListener('click', async function() {
     var raw = batchInput.value.trim();
     if (!raw) return;
     var lines = raw.split(/[\n]+/);
-    var added = 0;
+    var items = [];
     lines.forEach(function(line) {
       line = line.trim();
       if (!line) return;
-      // Support "SYMBOL,INDUSTRY" format
       var parts = line.split(/[,，]/);
       var sym = parts[0].trim().toUpperCase();
       var ind = parts[1] ? parts[1].trim() : '';
       if (!sym) return;
-      if (self.watchlist.indexOf(sym) === -1) {
-        self.watchlist.unshift(sym);
+      items.push({ symbol: sym, industry: ind });
+    });
+
+    if (self.isLocalhost()) {
+      var result = await self.serverAPI('batch-add', { items: items });
+      if (result && result.ok && result.count > 0) {
+        items.forEach(function(item) {
+          if (item.industry) self.setIndustry(item.symbol, item.industry);
+        });
+        await self.fetchData(true);
+        self.syncWatchlist();
+        self.render();
+        self.renderSidebar();
+        renderManageList(filterInput.value);
+        batchInput.value = '';
+        self.toast('已添加 ' + result.count + ' 只股票', 'success');
+      } else if (result && result.count === 0) {
+        self.toast('所有代码已在自选列表中', 'info');
+      } else {
+        self.toast('批量添加失败', 'error');
+      }
+      return;
+    }
+
+    // GitHub Pages: localStorage only
+    var added = 0;
+    items.forEach(function(item) {
+      if (self.watchlist.indexOf(item.symbol) === -1) {
+        self.watchlist.unshift(item.symbol);
         added++;
       }
-      if (ind) {
-        self.setIndustry(sym, ind);
+      if (item.industry) {
+        self.setIndustry(item.symbol, item.industry);
       }
     });
     if (added > 0) {
@@ -1054,6 +1242,30 @@ App.bindEvents = function() {
   this.$('#btn-refresh').addEventListener('click', function() {
     self.onRefresh();
   });
+
+  // Signals nav item (bound once, not in renderSidebar)
+  var signalsItem = document.querySelector('.sidebar-item[data-nav="signals"]');
+  if (signalsItem) {
+    signalsItem.addEventListener('click', function() {
+      self.activeIndustry = null;
+      self.showStarredOnly = false;
+      self.renderSidebar();
+      self.render();
+      self.$('#signals-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  // Starred nav item (bound once, not in renderSidebar)
+  var starredNavItem = document.querySelector('.sidebar-item[data-nav="starred"]');
+  if (starredNavItem) {
+    starredNavItem.addEventListener('click', function() {
+      self.activeIndustry = null;
+      self.showStarredOnly = !self.showStarredOnly;
+      self.renderSidebar();
+      self.render();
+      self.$('#industries-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 
   // Manage modal button
   this.$('#btn-manage').addEventListener('click', function() {

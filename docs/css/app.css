@@ -34,9 +34,12 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
-  display: flex;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  padding-left: var(--sidebar-width);
 }
 
 /* === Sidebar === */
@@ -128,10 +131,8 @@ body {
 
 /* === Main Wrap === */
 #main-wrap {
-  margin-left: var(--sidebar-width);
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  max-width: 768px;
 }
 
 /* === Top Bar === */
@@ -350,6 +351,11 @@ body {
 .signal-card.sell { border-left: 4px solid var(--color-danger); }
 .signal-card.watch { border-left: 4px solid var(--color-warning); }
 
+.signal-card.starred {
+  background: linear-gradient(135deg, #fffde7 0%, #fff8e1 100%);
+  border-left-width: 5px;
+}
+
 .signal-info { display: flex; align-items: center; gap: 8px; }
 .signal-symbol { font-weight: 700; font-size: 0.9rem; }
 .signal-name { color: var(--color-text-secondary); font-size: 0.75rem; }
@@ -469,6 +475,40 @@ body {
 
 .stock-row:active { background: #f9f9f9; }
 
+/* Star toggle button */
+.stock-star-btn {
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: transform 0.15s, color 0.15s;
+  color: #ccc;
+  line-height: 1;
+}
+
+.stock-star-btn:hover {
+  transform: scale(1.25);
+  color: #f9a825;
+}
+
+.stock-star-btn.star-active {
+  color: #f9a825;
+}
+
+.stock-star-btn.star-active:hover {
+  color: #f57f17;
+  transform: scale(1.15);
+}
+
+/* Starred stock row highlight */
+.stock-row.starred {
+  background: linear-gradient(135deg, #fffde7 0%, #fff8e1 100%);
+  border-left: 3px solid #f9a825;
+  padding-left: 11px;
+}
+
 .stock-row-main {
   display: flex;
   align-items: center;
@@ -530,13 +570,29 @@ body {
 }
 
 .stock-detail-wrap.open {
-  max-height: 1600px;
+  max-height: 3000px;
 }
 
 .detail-card {
   padding: 12px 14px;
   background: #fafbfc;
   border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 16px;
+  flex-wrap: nowrap;
+  flex-direction: row;
+}
+
+.detail-card-left {
+  flex: 0 0 400px;
+  width: 400px;
+  min-width: 280px;
+}
+
+.detail-card-right {
+  flex: 1 1 auto;
+  min-width: 350px;
+  overflow: hidden;
 }
 
 .detail-price-row {
@@ -819,12 +875,12 @@ body {
     width: 50px;
     --sidebar-width: 50px;
   }
+  body { padding-left: 50px; }
   .sidebar-title, .sidebar-item span:not(.sidebar-icon):not(.sidebar-badge),
   .sidebar-industry-item span:not(.sidebar-industry-icon):not(.sidebar-industry-count) {
     display: none;
   }
   .sidebar-industry-count { display: none; }
-  #main-wrap { margin-left: 50px; }
   .detail-metrics {
     grid-template-columns: 1fr 1fr;
   }
@@ -1014,4 +1070,84 @@ body {
   .rs-prices {
     grid-template-columns: 1fr;
   }
+}
+
+/* ============================================================
+   CHARTS — Price + MAs + Volume / KDJ
+   ============================================================ */
+
+.chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.chart-panel {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.chart-panel--price {
+  height: 300px;
+}
+
+.chart-panel--kdj {
+  height: 180px;
+}
+
+.chart-canvas {
+  display: block;
+  width: 100%;
+}
+
+/* Tooltip */
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 30, 0.9);
+  color: #eee;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+  z-index: 10;
+  min-width: 140px;
+  max-width: 240px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+
+.chart-tooltip .tt-date {
+  font-weight: 700;
+  color: #fff;
+  font-size: 0.72rem;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  padding-bottom: 2px;
+}
+
+.chart-tooltip b {
+  color: #fff;
+}
+
+/* Responsive: stack vertically on narrow screens */
+@media (max-width: 850px) {
+  .detail-card {
+    flex-direction: column;
+  }
+  .detail-card-left,
+  .detail-card-right {
+    max-width: none;
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .chart-panel--price { height: 250px; }
+  .chart-panel--kdj { height: 150px; }
 }
