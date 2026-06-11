@@ -527,9 +527,81 @@ class DataFetcher:
         return results
 
     # ----- Unified fetch (non-Playwright sources only) -----
+    # ----- Sina Finance fetch (most reliable for China users) -----
+    def fetch_with_sina(self, symbol: str) -> pd.DataFrame | None:
+        """Fetch daily kline from Sina Finance US stock API.
+        No API key needed, works well from mainland China.
+        """
+        if self.cb.dead("sina"):
+            return None
+        try:
+            import requests
+        except ImportError:
+            return None
+
+        url = (
+            f"https://stock.finance.sina.com.cn/usstock/api/json_v2.php/"
+            f"US_MinKService.getDailyK?symbol={symbol}&type=daily&num={self.history_days * 2}"
+        )
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        }
+
+        for attempt in range(3):
+            try:
+                log.info(f"  sina attempt {attempt + 1} for {symbol}")
+                resp = requests.get(url, headers=headers, timeout=15)
+                if resp.status_code != 200:
+                    log.warning(f"  sina HTTP {resp.status_code} for {symbol}")
+                    time.sleep(2)
+                    continue
+                data = resp.json()
+                if not isinstance(data, list) or len(data) == 0:
+                    log.warning(f"  sina empty for {symbol}")
+                    time.sleep(2)
+                    continue
+
+                rows = []
+                for r in data:
+                    try:
+                        rows.append({
+                            "Date": pd.to_datetime(r["d"]),
+                            "Open": float(r["o"]),
+                            "High": float(r["h"]),
+                            "Low": float(r["l"]),
+                            "Close": float(r["c"]),
+                            "Volume": int(r["v"]),
+                        })
+                    except (KeyError, ValueError, TypeError):
+                        continue
+
+                if not rows:
+                    return None
+
+                df = pd.DataFrame(rows)
+                df = df.set_index("Date").sort_index()
+                df = df[~df.index.duplicated(keep="last")]
+                df = df.tail(self.history_days)
+
+                log.info(f"  sina OK: {len(df)} rows for {symbol}")
+                self.cb.ok("sina")
+                return df
+
+            except Exception as e:
+                log.warning(f"  sina attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+                time.sleep(2)
+
+        self.cb.fail("sina")
+        return None
+
     def fetch_stock_quick(self, symbol: str) -> pd.DataFrame | None:
-        """Try fast sources only: akshare → efinance → yfinance.
+        """Try fast sources only: sina → akshare → efinance → yfinance.
         Returns DataFrame or None (caller should fall back to Playwright)."""
+        df = self.fetch_with_sina(symbol)
+        if df is not None and len(df) >= 5:
+            return df
+
         df = self.fetch_with_akshare(symbol)
         if df is not None and len(df) >= 5:
             return df
@@ -696,23 +768,411 @@ class DataFetcher:
 
         return {'signal': None, 'signal_strength': None}
 
-    # ----- Market cap (try efinance) -----
+    # ----- Market cap (multi-source) -----
     def fetch_market_cap(self, symbol: str) -> float | None:
-        """Try to get market cap via efinance base info."""
-        if not self.efinance_ok or self.ef is None:
-            return None
+        """Try to get market cap via multiple sources."""
+        # Try efinance first
+        if self.efinance_ok and self.ef is not None:
+            try:
+                info = self.ef.stock.get_base_info(symbol)
+                if info is not None and len(info) > 0:
+                    row = info.iloc[0] if hasattr(info, 'iloc') else info
+                    for key in ['总市值', 'totalMv', 'marketCap', '总市值(元)']:
+                        if key in row:
+                            val = row[key]
+                            if pd.notna(val):
+                                return float(val)
+            except Exception:
+                pass
+
+        # Try Playwright → Yahoo Finance quote page
         try:
-            info = self.ef.stock.get_base_info(symbol)
-            if info is not None and len(info) > 0:
-                row = info.iloc[0] if hasattr(info, 'iloc') else info
-                for key in ['总市值', 'totalMv', 'marketCap', '总市值(元)']:
-                    if key in row:
-                        val = row[key]
-                        if pd.notna(val):
-                            return float(val)
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return None
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    )
+                )
+                page = context.new_page()
+                try:
+                    page.goto(f"https://finance.yahoo.com/quote/{symbol}/", timeout=15000, wait_until="domcontentloaded")
+                except Exception:
+                    browser.close()
+                    return None
+
+                page.wait_for_timeout(1500)
+
+                mcap_val = page.evaluate("""() => {
+                    const els = document.querySelectorAll('fin-streamer[data-field="marketCap"]');
+                    if (els.length > 0) {
+                        return els[0].textContent.trim();
+                    }
+                    return null;
+                }""")
+                browser.close()
+
+                if mcap_val:
+                    return self._parse_num(mcap_val)
         except Exception:
             pass
         return None
+
+    # ----- Verification via Yahoo Finance -----
+    def verify_stock_via_playwright(self, symbol: str, local_data: dict) -> dict | None:
+        """Verify a single stock's data against Yahoo Finance quote page.
+        Returns dict with discrepancies, or None if verification failed to run.
+        local_data should have: close, prev_close, open, high, low, volume
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            log.warning("  Playwright not installed — cannot verify")
+            return None
+
+        log.info(f"  Verifying {symbol} via Yahoo Finance ...")
+        result = {"symbol": symbol, "warnings": [], "errors": [], "yahoo": {}}
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    )
+                )
+                page = context.new_page()
+
+                # Navigate to quote page
+                quote_url = f"https://finance.yahoo.com/quote/{symbol}/"
+                try:
+                    page.goto(quote_url, timeout=20000, wait_until="domcontentloaded")
+                except Exception:
+                    browser.close()
+                    return None
+
+                page.wait_for_timeout(2000)
+
+                # Handle consent dialog
+                try:
+                    consent_btn = page.locator(
+                        'button[name="agree"], button:has-text("Accept"), '
+                        'button:has-text("Agree"), button:has-text("I Accept")'
+                    )
+                    if consent_btn.count() > 0:
+                        consent_btn.first.click()
+                        page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+
+                # Extract data via JS
+                yahoo_data = page.evaluate("""() => {
+                    const result = {};
+                    document.querySelectorAll('fin-streamer').forEach(el => {
+                        const field = el.getAttribute('data-field');
+                        const symbol = el.getAttribute('data-symbol');
+                        if (field && (!symbol || symbol.toUpperCase() === arguments[0].toUpperCase())) {
+                            result[field] = el.textContent.trim();
+                        }
+                    });
+
+                    // Fallback: get any fin-streamer regardless of symbol attribute
+                    if (!result.regularMarketPrice) {
+                        document.querySelectorAll('fin-streamer').forEach(el => {
+                            const field = el.getAttribute('data-field');
+                            if (field && !result[field]) {
+                                result[field] = el.textContent.trim();
+                            }
+                        });
+                    }
+                    return result;
+                }""", symbol)
+
+                browser.close()
+
+                if not yahoo_data or not yahoo_data.get('regularMarketPrice'):
+                    log.warning(f"    Yahoo data incomplete for {symbol}")
+                    return None
+
+                result["yahoo"] = yahoo_data
+
+                # --- Compare fields ---
+                local_close = float(local_data.get('close', 0))
+                local_prev = float(local_data.get('prev_close', 0))
+                local_open = float(local_data.get('open', 0))
+                local_high = float(local_data.get('high', 0))
+                local_low = float(local_data.get('low', 0))
+                local_vol = int(local_data.get('volume', 0))
+
+                # Previous close comparison (most reliable — yesterday's final data)
+                yahoo_prev_close = self._parse_num(yahoo_data.get('regularMarketPreviousClose'))
+                if yahoo_prev_close and yahoo_prev_close > 0 and local_prev > 0:
+                    prev_diff_pct = abs(local_prev - yahoo_prev_close) / yahoo_prev_close * 100
+                    if prev_diff_pct > 2.0:
+                        result["errors"].append(
+                            f"prev_close mismatch: local={local_prev:.2f} vs yahoo={yahoo_prev_close:.2f} ({prev_diff_pct:.1f}%)"
+                        )
+                    elif prev_diff_pct > 0.1:
+                        result["warnings"].append(
+                            f"prev_close slight diff: local={local_prev:.2f} vs yahoo={yahoo_prev_close:.2f} ({prev_diff_pct:.2f}%)"
+                        )
+
+                # Open comparison
+                yahoo_open = self._parse_num(yahoo_data.get('regularMarketOpen'))
+                if yahoo_open and yahoo_open > 0 and local_open > 0:
+                    open_diff_pct = abs(local_open - yahoo_open) / yahoo_open * 100
+                    if open_diff_pct > 1.0:
+                        result["errors"].append(
+                            f"open mismatch: local={local_open:.2f} vs yahoo={yahoo_open:.2f} ({open_diff_pct:.1f}%)"
+                        )
+
+                # Volume comparison (allow larger tolerance — may be intraday vs final)
+                yahoo_vol = self._parse_num(yahoo_data.get('regularMarketVolume'))
+                if yahoo_vol and yahoo_vol > 0 and local_vol > 0:
+                    vol_diff_pct = abs(local_vol - yahoo_vol) / yahoo_vol * 100
+                    if vol_diff_pct > 80:
+                        result["errors"].append(
+                            f"volume major mismatch: local={local_vol:,} vs yahoo={yahoo_vol:,} ({vol_diff_pct:.0f}%)"
+                        )
+                    elif vol_diff_pct > 30:
+                        result["warnings"].append(
+                            f"volume diff: local={local_vol:,} vs yahoo={yahoo_vol:,} ({vol_diff_pct:.0f}%)"
+                        )
+
+                # Day range: our high/low should be within or close to Yahoo's range
+                yahoo_range_str = yahoo_data.get('regularMarketDayRange', '')
+                if yahoo_range_str and ' - ' in yahoo_range_str:
+                    parts = yahoo_range_str.split(' - ')
+                    yahoo_low = self._parse_num(parts[0])
+                    yahoo_high = self._parse_num(parts[1])
+                    if yahoo_low and yahoo_high:
+                        if local_high > 0 and local_high > yahoo_high * 1.02:
+                            result["warnings"].append(
+                                f"high outside range: local={local_high:.2f} vs yahoo_high={yahoo_high:.2f}"
+                            )
+                        if local_low > 0 and local_low < yahoo_low * 0.98:
+                            result["warnings"].append(
+                                f"low outside range: local={local_low:.2f} vs yahoo_low={yahoo_low:.2f}"
+                            )
+
+                # Close price comparison (only if market closed — intraday will differ)
+                yahoo_price = self._parse_num(yahoo_data.get('regularMarketPrice'))
+                if yahoo_price and yahoo_price > 0 and local_close > 0:
+                    close_diff_pct = abs(local_close - yahoo_price) / yahoo_price * 100
+                    if close_diff_pct > 2.0:
+                        result["errors"].append(
+                            f"close major mismatch: local={local_close:.2f} vs yahoo={yahoo_price:.2f} ({close_diff_pct:.1f}%)"
+                        )
+                    elif close_diff_pct > 0.2:
+                        result["warnings"].append(
+                            f"close diff: local={local_close:.2f} vs yahoo={yahoo_price:.2f} ({close_diff_pct:.2f}%)"
+                        )
+
+                # Determine overall status
+                status = "ok"
+                if result["errors"]:
+                    status = "error"
+                elif result["warnings"]:
+                    status = "warning"
+                result["status"] = status
+
+                # Build corrected data from Yahoo if errors exist
+                if result["errors"]:
+                    corrected = {}
+                    if yahoo_prev_close:
+                        corrected["prev_close"] = yahoo_prev_close
+                    if yahoo_open:
+                        corrected["open"] = yahoo_open
+                    if yahoo_price:
+                        corrected["close"] = yahoo_price
+                    if yahoo_vol:
+                        corrected["volume"] = int(yahoo_vol)
+                    if yahoo_range_str and ' - ' in yahoo_range_str:
+                        parts = yahoo_range_str.split(' - ')
+                        corrected_low = self._parse_num(parts[0])
+                        corrected_high = self._parse_num(parts[1])
+                        if corrected_low:
+                            corrected["low"] = corrected_low
+                        if corrected_high:
+                            corrected["high"] = corrected_high
+                    result["corrected"] = corrected
+
+                level = "ERROR" if result["errors"] else ("WARN" if result["warnings"] else "OK")
+                log.info(f"    {symbol}: {level} ({len(result['errors'])} errors, {len(result['warnings'])} warnings)")
+                return result
+
+        except Exception as e:
+            log.error(f"  Verification failed for {symbol}: {type(e).__name__}: {e}")
+            return None
+
+    @staticmethod
+    def _parse_num(val) -> float | None:
+        """Parse a numeric value from string, handling commas, M/B suffixes."""
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        try:
+            s = str(val).replace(',', '').replace('%', '').replace('+', '').strip()
+            if s.upper().endswith('T'):
+                return float(s[:-1]) * 1e12
+            if s.upper().endswith('B'):
+                return float(s[:-1]) * 1e9
+            if s.upper().endswith('M'):
+                return float(s[:-1]) * 1e6
+            if s.upper().endswith('K'):
+                return float(s[:-1]) * 1e3
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
+    def verify_snapshot(self, snapshot: dict, sample_size: int = 5) -> dict:
+        """Verify a sample of stocks against Yahoo Finance.
+        Returns verification report with per-stock results and summary.
+        """
+        stocks = snapshot.get("stocks", [])
+        if not stocks:
+            return {"status": "empty", "results": [], "summary": "No stocks to verify"}
+
+        # Verify at least sample_size stocks, prioritizing:
+        # 1. Stocks with change > 5% (suspicious)
+        # 2. Stocks with close=0 (broken)
+        # 3. Largest market cap stocks (important)
+        # 4. Random sampling
+
+        to_verify = []
+        verified = set()
+        remaining = list(stocks)
+
+        # Priority 1: extreme movers
+        extreme = [s for s in remaining if abs(s.get('change_pct', 0)) > 5]
+        to_verify.extend(extreme)
+        remaining = [s for s in remaining if s not in extreme]
+        verified.update(s['symbol'] for s in extreme)
+
+        # Priority 2: broken stocks (close=0)
+        broken = [s for s in remaining if s.get('close', 0) == 0]
+        to_verify.extend(broken)
+        remaining = [s for s in remaining if s not in broken]
+        verified.update(s['symbol'] for s in broken)
+
+        # Priority 3: top market cap
+        top = [s for s in remaining if s.get('market_cap', 0) > 0][:3]
+        to_verify.extend(top)
+        remaining = [s for s in remaining if s not in top]
+        verified.update(s['symbol'] for s in top)
+
+        # Priority 4: top by volume (most actively traded)
+        by_vol = sorted(remaining, key=lambda s: s.get('volume', 0), reverse=True)[:3]
+        to_verify.extend(by_vol)
+        remaining = [s for s in remaining if s not in by_vol]
+        verified.update(s['symbol'] for s in by_vol)
+
+        # Fill remaining slots randomly
+        need = max(0, sample_size - len(to_verify))
+        if need > 0 and remaining:
+            import random
+            extras = random.sample(remaining, min(need, len(remaining)))
+            to_verify.extend(extras)
+
+        log.info(f"Verifying {len(to_verify)} stocks: {[s['symbol'] for s in to_verify]}")
+
+        results = []
+        errors_count = 0
+        warnings_count = 0
+        ok_count = 0
+
+        for stock in to_verify:
+            sym = stock['symbol']
+            # Skip index-like symbols that Yahoo Finance can't quote
+            if sym.startswith('.') or sym in ('NQMAIN',):
+                log.info(f"  Skipping {sym} (index/invalid symbol for Yahoo quote)")
+                ok_count += 1
+                continue
+
+            result = self.verify_stock_via_playwright(sym, stock)
+            if result is None:
+                ok_count += 1  # verification failed to run, not a data error
+                continue
+
+            results.append(result)
+            if result['status'] == 'error':
+                errors_count += 1
+            elif result['status'] == 'warning':
+                warnings_count += 1
+            else:
+                ok_count += 1
+
+        total = len(results)
+        summary = f"Verified {total} stocks: {errors_count} errors, {warnings_count} warnings, {ok_count} OK"
+
+        if errors_count > 0:
+            summary += f" — DATA QUALITY ISSUES FOUND!"
+
+        log.info(f"Verification complete: {summary}")
+
+        return {
+            "status": "error" if errors_count > 0 else ("warning" if warnings_count > 0 else "ok"),
+            "results": results,
+            "errors_count": errors_count,
+            "warnings_count": warnings_count,
+            "ok_count": ok_count,
+            "summary": summary,
+        }
+
+    def auto_correct(self, snapshot: dict, verification_report: dict) -> dict:
+        """Apply corrections from verification report to snapshot.
+        Only corrects fields where Yahoo Finance data is clearly more reliable
+        (prev_close, open, high, low) — volume and close are corrected only if
+        the discrepancy is large enough to indicate clearly wrong data.
+        """
+        results = verification_report.get("results", [])
+        corrected_count = 0
+        stocks_map = {s['symbol']: s for s in snapshot.get('stocks', [])}
+
+        for r in results:
+            if r['status'] != 'error' or 'corrected' not in r:
+                continue
+            sym = r['symbol']
+            corrected = r['corrected']
+            if sym not in stocks_map:
+                continue
+
+            stock = stocks_map[sym]
+            for field in ['prev_close', 'open', 'high', 'low', 'close', 'volume']:
+                if field in corrected and field in stock:
+                    old_val = stock[field]
+                    new_val = corrected[field]
+                    if field == 'volume':
+                        new_val = int(new_val)
+                    else:
+                        new_val = round(float(new_val), 2)
+                    if abs(float(old_val or 0) - float(new_val or 0)) > 0.001:
+                        log.info(f"  Correcting {sym}.{field}: {old_val} → {new_val}")
+                        stock[field] = new_val
+
+            # Recalculate change_pct if prev_close or close was corrected
+            if 'prev_close' in corrected or 'close' in corrected:
+                stock['change_pct'] = round(
+                    float(stock['close'] - stock['prev_close']) / float(stock['prev_close']) * 100, 2
+                )
+            corrected_count += 1
+
+        if corrected_count > 0:
+            # Re-save snapshot
+            save_json(STOCKS_FILE, snapshot)
+            log.info(f"Auto-corrected {corrected_count} stocks, snapshot re-saved")
+
+        return snapshot
 
     # ----- Snapshot generation -----
     def generate_snapshot(self, all_data: dict) -> dict:
@@ -785,14 +1245,23 @@ class DataFetcher:
         }
 
     # ----- Main runner -----
-    def run(self, symbols: list[str] | None = None):
+    def run(self, symbols: list[str] | None = None, no_verify: bool = False, no_mcap: bool = False):
         """Two-phase pipeline:
         Phase 1 — try akshare/efinance/yfinance for each stock (fast, with circuit breaker).
         Phase 2 — batch-fetch remaining stocks via Playwright (browser reuse + concurrency).
+        Phase 3 — verify data accuracy against Yahoo Finance & auto-correct.
         Then save history and generate snapshot.
         """
         if symbols is None:
             symbols = self.load_watchlist()
+
+        # Remove index symbols that can't be fetched through stock APIs
+        # These symbols either have no data or require different API endpoints
+        INDEX_SYMBOLS = {'.SOX', '.NDX', '.IXIC', 'NQMAIN'}
+        symbols = [s for s in symbols if s.strip().upper() not in INDEX_SYMBOLS]
+        removed = [s for s in symbols if s.strip().upper() in INDEX_SYMBOLS]
+        if removed:
+            log.warning(f"Skipping index symbols (not supported by stock APIs): {removed}")
 
         # Load ALL existing stocks so we never drop data for stocks
         # that weren't in the current fetch set
@@ -805,6 +1274,9 @@ class DataFetcher:
         # generate_snapshot will reuse the old snapshot entry verbatim)
         all_data = {}
         for sym, s in existing_map.items():
+            # Skip index symbols in existing data too
+            if sym in INDEX_SYMBOLS:
+                continue
             all_data[sym] = {
                 "df": None,
                 "name": s.get("name", sym),
@@ -815,6 +1287,7 @@ class DataFetcher:
         success = 0
         fail = 0
         need_playwright: list[str] = []
+        need_mcap: list[str] = []   # stocks that still have market_cap=0
 
         # ---- Phase 1: fast sources only ----
         log.info(f"Phase 1: fast sources for {len(symbols)} symbols")
@@ -828,11 +1301,17 @@ class DataFetcher:
             if df is not None and len(df) >= 5:
                 df = self.compute_indicators(df)
                 self.save_history(sym, df)
+
+                old = existing_map.get(sym, {})
+                mcap = old.get("market_cap", 0)
+                if mcap == 0 and not no_mcap:
+                    need_mcap.append(sym)
+
                 info = {
                     "df": df,
-                    "name": existing_map.get(sym, {}).get("name", sym),
-                    "sector": existing_map.get(sym, {}).get("sector", "其他"),
-                    "market_cap": existing_map.get(sym, {}).get("market_cap", 0),
+                    "name": old.get("name", sym),
+                    "sector": old.get("sector", "其他"),
+                    "market_cap": mcap,
                 }
                 all_data[sym] = info
                 success += 1
@@ -847,22 +1326,37 @@ class DataFetcher:
                 if df is not None and len(df) >= 5:
                     df = self.compute_indicators(df)
                     self.save_history(sym, df)
+
+                    old = existing_map.get(sym, {})
+                    mcap = old.get("market_cap", 0)
+                    if mcap == 0 and not no_mcap:
+                        need_mcap.append(sym)
+
                     info = {
                         "df": df,
-                        "name": existing_map.get(sym, {}).get("name", sym),
-                        "sector": existing_map.get(sym, {}).get("sector", "其他"),
-                        "market_cap": existing_map.get(sym, {}).get("market_cap", 0),
+                        "name": old.get("name", sym),
+                        "sector": old.get("sector", "其他"),
+                        "market_cap": mcap,
                     }
                     all_data[sym] = info
                     success += 1
                 else:
                     fail += 1
-        else:
-            # All stocks fetched in phase 1 — nothing to do
-            pass
 
-        # Fail count includes stocks that were never in the fetch set
-        fail += len([s for s in existing_map if s not in [x.strip().upper() for x in symbols]])
+        # ---- Market cap batch fetch ----
+        if need_mcap and not no_mcap:
+            log.info(f"Fetching market caps for {len(need_mcap)} stocks via Playwright ...")
+            for sym in need_mcap:
+                try:
+                    mcap = self.fetch_market_cap(sym)
+                    if mcap and mcap > 0:
+                        # Store in all_data for snapshot generation
+                        if sym in all_data:
+                            all_data[sym]['market_cap'] = int(mcap)
+                        log.info(f"  {sym} market cap: {mcap:,.0f}")
+                    time.sleep(0.5)  # rate limit
+                except Exception as e:
+                    log.warning(f"  Market cap fetch failed for {sym}: {e}")
 
         log.info(f"Fetch complete: {success} OK, {fail} failed (circuit-breaker: "
                  f"akshare={'dead' if self.cb.dead('akshare') else 'alive'}, "
@@ -871,6 +1365,20 @@ class DataFetcher:
 
         # Generate snapshot
         snapshot = self.generate_snapshot(all_data)
+
+        # ---- Phase 3: Verify & auto-correct ----
+        if not no_verify:
+            log.info("Phase 3: Verify data accuracy via Yahoo Finance ...")
+            try:
+                report = self.verify_snapshot(snapshot, sample_size=8)
+                if report.get("errors_count", 0) > 0:
+                    log.warning(f"  Verification found {report['errors_count']} stock(s) with errors!")
+                    snapshot = self.auto_correct(snapshot, report)
+            except Exception as e:
+                log.warning(f"  Verification skipped due to error: {type(e).__name__}: {e}")
+        else:
+            log.info("Phase 3: Verification skipped (--no-verify)")
+
         save_json(STOCKS_FILE, snapshot)
         log.info(f"Snapshot saved to {STOCKS_FILE}: {len(snapshot['stocks'])} stocks")
 
@@ -888,6 +1396,8 @@ def main():
     parser.add_argument("--skip-akshare", action="store_true", help="Skip akshare (domestic CN source)")
     parser.add_argument("--skip-efinance", action="store_true", help="Skip efinance (domestic CN source)")
     parser.add_argument("--skip-yfinance", action="store_true", help="Skip yfinance (Yahoo API)")
+    parser.add_argument("--no-verify", action="store_true", help="Skip Yahoo Finance verification step")
+    parser.add_argument("--no-mcap", action="store_true", help="Skip market cap fetching")
     args = parser.parse_args()
 
     fetcher = DataFetcher(history_days=args.days)
@@ -911,7 +1421,7 @@ def main():
     else:
         symbols = fetcher.load_watchlist()
 
-    snapshot = fetcher.run(symbols)
+    snapshot = fetcher.run(symbols, no_verify=args.no_verify, no_mcap=args.no_mcap)
 
     # Print summary
     print()

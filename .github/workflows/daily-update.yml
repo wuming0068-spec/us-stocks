@@ -27,7 +27,7 @@ jobs:
           playwright install chromium
 
       - name: Fetch stock data
-        run: python scripts/fetch_data.py
+        run: python scripts/fetch_data_v2.py
         env:
           PYTHONUNBUFFERED: 1
 
