@@ -48,9 +48,8 @@ const App = {
           resp = await fetch('https://raw.githubusercontent.com/wuming0068-spec/us-stocks/master/docs/data/stocks.json?t=' + ts);
         }
       } else {
-        // GitHub Pages: load from deployed data file
-        const url = forceRefresh ? 'data/stocks.json?t=' + ts : 'data/stocks.json';
-        resp = await fetch(url);
+        // GitHub Pages: load from deployed data file, always bust CDN cache
+        resp = await fetch('data/stocks.json?t=' + ts);
       }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const json = await resp.json();
