@@ -33,7 +33,7 @@ DATA_DIR = ROOT / "docs" / "data"
 HISTORY_DIR = DATA_DIR / "history"
 STOCKS_FILE = DATA_DIR / "stocks.json"
 
-DEFAULT_HISTORY_DAYS = 120
+DEFAULT_HISTORY_DAYS = 300
 MCAP_BATCH_SIZE = 25  # East Money ulist max per request
 
 # ---------------------------------------------------------------------------
