@@ -27,6 +27,11 @@
       <span id="sidebar-starred-count" class="sidebar-badge hidden">0</span>
     </li>
     <li class="sidebar-divider"></li>
+    <li class="sidebar-item" data-nav="intraday">
+      <span class="sidebar-icon">📊</span>
+      <span>日内波动</span>
+    </li>
+    <li class="sidebar-divider"></li>
   </ul>
   <div id="sidebar-industries" class="sidebar-industries">
     <!-- Dynamically filled -->
@@ -88,6 +93,29 @@
     <h2 class="section-title">📊 行业概览</h2>
     <div id="industries-list"></div>
     <div id="industries-empty" class="empty-state hidden">没有自选股数据。点击上方「+ 添加」开始添加自选股。</div>
+  </section>
+
+  <!-- Intraday Volatility Section -->
+  <section id="intraday-section" class="hidden">
+    <h2 class="section-title">📊 日内波动分析</h2>
+    <div class="intraday-controls">
+      <div class="period-tabs" id="intraday-period-tabs">
+        <button class="period-tab active" data-period="300">300天</button>
+        <button class="period-tab" data-period="200">200天</button>
+        <button class="period-tab" data-period="100">100天</button>
+        <button class="period-tab" data-period="60">60天</button>
+      </div>
+      <div class="intraday-note">
+        📡 数据更新: <span id="intraday-update-time">加载中...</span>
+      </div>
+    </div>
+    <div class="intraday-table-wrap">
+      <table id="intraday-table">
+        <thead id="intraday-thead"></thead>
+        <tbody id="intraday-tbody"></tbody>
+      </table>
+    </div>
+    <div id="intraday-empty" class="empty-state hidden">暂无日内波动数据。</div>
   </section>
 
 </main>
@@ -157,5 +185,6 @@
 <script src="js/indicators.js?v=2"></script>
 <script src="js/charts.js?v=1"></script>
 <script src="js/app.js?v=8"></script>
+<script src="js/intraday.js?v=1"></script>
 </body>
 </html>

@@ -1151,3 +1151,155 @@ body {
   .chart-panel--price { height: 250px; }
   .chart-panel--kdj { height: 150px; }
 }
+
+/* ============================================================
+   Intraday Volatility Table
+   ============================================================ */
+
+.intraday-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.period-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--color-card);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: var(--shadow-card);
+}
+
+.period-tab {
+  padding: 6px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.period-tab:hover { background: #f0f0f0; color: var(--color-text); }
+
+.period-tab.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.intraday-note {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+/* Scrollable table wrapper */
+.intraday-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  background: var(--color-card);
+  -webkit-overflow-scrolling: touch;
+}
+
+#intraday-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  min-width: 1100px;
+}
+
+#intraday-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+#intraday-table th {
+  background: #f8f9fb;
+  padding: 8px 10px;
+  text-align: center;
+  font-weight: 600;
+  border-bottom: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.73rem;
+}
+
+/* Sticky left column */
+.th-fixed, .td-fixed {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--color-card);
+}
+
+.th-fixed {
+  background: #f8f9fb !important;
+  z-index: 3 !important;
+}
+
+.td-fixed {
+  min-width: 110px;
+  text-align: left !important;
+  padding: 8px 10px !important;
+}
+
+/* Group headers */
+.th-grp { font-weight: 700; font-size: 0.78rem !important; }
+.th-grp-up { background: #e8f5e9 !important; color: #2e7d32 !important; }
+.th-grp-down { background: #ffebee !important; color: #c62828 !important; }
+.th-grp-swing { background: #e3f2fd !important; color: #1565c0 !important; }
+
+.th-s {
+  font-size: 0.7rem !important;
+  padding: 5px 8px !important;
+}
+
+#intraday-table tbody td {
+  padding: 6px 8px;
+  text-align: center;
+  border-bottom: 1px solid #f0f0f0;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+#intraday-table tbody tr:hover { background: #fafbfc; }
+#intraday-table tbody tr:hover .td-fixed { background: #fafbfc; }
+
+/* Stock cell */
+.td-stock-col, .th-stock-col {
+  text-align: left !important;
+  min-width: 110px;
+}
+.s-sym { font-weight: 600; display: block; font-size: 0.8rem; }
+.s-name { font-size: 0.7rem; color: var(--color-text-secondary); display: block; }
+
+/* Price column */
+.td-price-col, .th-price-col { min-width: 70px; font-weight: 600; }
+
+/* Mean & std */
+.td-mean { font-weight: 600; }
+.td-std { color: var(--color-text-secondary); }
+
+/* Sigma cells */
+.td-sig { min-width: 85px; }
+.sig-price, .sig-range { display: block; font-weight: 600; font-size: 0.8rem; }
+.sig-exceed {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+  margin-top: 1px;
+}
+
+.cell-hot { color: var(--color-danger) !important; font-weight: 700; }
+.cell-warm { color: var(--color-warning) !important; font-weight: 600; }
+
+/* NA cells */
+.td-na { color: #bbb; text-align: center; }
+
