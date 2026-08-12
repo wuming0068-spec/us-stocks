@@ -12,6 +12,7 @@ const App = {
   showStarredOnly: false,  // When true, only show starred stocks
   filteredSymbols: null,  // Current search filter (null = show all)
   activeIndustry: null,   // Currently selected industry from sidebar (null = show all)
+  symbolDB: [],           // Stock symbol database for autocomplete
   refreshCount: 10,       // Remaining manual force-refresh count today
   updateTime: null,       // Timestamp from stocks.json
   dataDate: null,         // Data date from stocks.json
@@ -28,6 +29,7 @@ const App = {
     this.bindEvents();
     this.render();
     this.renderSidebar();
+    this.loadSymbolDB();  // async, not awaited — non-critical
   },
 
   // === DOM Helpers ===
@@ -900,6 +902,79 @@ App.scrollToStock = function(symbol) {
 // PART 5: Search, Add, Remove, Refresh, Modal, Toast
 // ============================================================
 
+// === Add Symbol Autocomplete ===
+/** Load stock symbol database for autocomplete */
+App.loadSymbolDB = async function() {
+  try {
+    var resp = await fetch('data/symbols.json?' + Date.now());
+    if (resp.ok) {
+      this.symbolDB = await resp.json();
+    }
+  } catch(e) {
+    console.warn('Failed to load symbols.json');
+  }
+};
+
+/** Handle input on #add-symbol to show suggestions */
+App.onAddSymbolInput = function(e) {
+  var query = e.target.value.trim().toUpperCase();
+  var dropdown = this.$('#add-suggestions');
+  if (!dropdown) return;
+  if (!query || query.length < 1) {
+    this.hideAddSuggestions();
+    return;
+  }
+  var self = this;
+  var matches = this.symbolDB.filter(function(s) {
+    var sym = s.symbol.toUpperCase();
+    var name = (s.name || '').toUpperCase();
+    return sym.indexOf(query) !== -1 || name.indexOf(query) !== -1;
+  });
+  if (matches.length === 0) {
+    this.hideAddSuggestions();
+    return;
+  }
+  var prefix = matches.filter(function(s) { return s.symbol.toUpperCase().startsWith(query); });
+  var rest = matches.filter(function(s) { return !s.symbol.toUpperCase().startsWith(query); });
+  var results = prefix.concat(rest).slice(0, 10);
+  var html = '';
+  results.forEach(function(s) {
+    html += '<div class="suggestion-item" data-symbol="' + s.symbol + '" data-sector="' + (s.sector || '') + '">' +
+      '<span class="sugg-symbol">' + s.symbol + '</span>' +
+      '<span class="sugg-name">' + (s.name || '') + '</span>' +
+      '<span class="sugg-sector">' + (s.sector || '') + '</span>' +
+    '</div>';
+  });
+  dropdown.innerHTML = html;
+  dropdown.classList.remove('hidden');
+  var items = dropdown.querySelectorAll('.suggestion-item');
+  items.forEach(function(item) {
+    item.addEventListener('mousedown', function(ev) {
+      ev.preventDefault();
+      self.$('#add-symbol').value = item.getAttribute('data-symbol');
+      self.$('#add-industry').value = item.getAttribute('data-sector');
+      self.hideAddSuggestions();
+      self.$('#add-industry').focus();
+    });
+    item.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        self.$('#add-symbol').value = item.getAttribute('data-symbol');
+        self.$('#add-industry').value = item.getAttribute('data-sector');
+        self.hideAddSuggestions();
+        self.$('#add-industry').focus();
+      }
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); var n = item.nextElementSibling; if (n) n.focus(); }
+      if (ev.key === 'ArrowUp') { ev.preventDefault(); var p = item.previousElementSibling; if (p) p.focus(); else self.$('#add-symbol').focus(); }
+    });
+  });
+};
+
+App.hideAddSuggestions = function() {
+  var dropdown = this.$('#add-suggestions');
+  if (dropdown) { dropdown.classList.add('hidden'); dropdown.innerHTML = ''; }
+};
+
 // === Search ===
 App.onSearchInput = function(e) {
   var query = e.target.value.trim().toUpperCase();
@@ -1232,7 +1307,20 @@ App.bindEvents = function() {
         industryInput.focus();
       }
     }
-    if (e.key === 'Escape') self.hideAddForm();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      var first = self.$('#add-suggestions .suggestion-item');
+      if (first) first.focus();
+    }
+    if (e.key === 'Escape') { self.hideAddSuggestions(); }
+  });
+  // Autocomplete input
+  this.$('#add-symbol').addEventListener('input', function(e) {
+    self.onAddSymbolInput(e);
+  });
+  // Focus out — delay to allow click on suggestion
+  this.$('#add-symbol').addEventListener('blur', function() {
+    setTimeout(function() { self.hideAddSuggestions(); }, 150);
   });
   this.$('#add-industry').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') self.confirmAdd();

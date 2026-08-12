@@ -255,6 +255,11 @@ body {
 .suggestion-item:hover { background: #f0f4ff; }
 .suggestion-item .sugg-symbol { font-weight: 700; }
 .suggestion-item .sugg-name { color: var(--color-text-secondary); font-size: 0.75rem; }
+.suggestion-item .sugg-sector { font-size: 0.68rem; color: #999; margin-left: auto; padding-left: 6px; white-space: nowrap; }
+.suggestion-item:focus, .suggestion-item.focused { background: #f0f4ff; outline: none; }
+
+/* Wrapper for add-symbol input + dropdown */
+.add-symbol-wrap { position: relative; }
 
 .btn-primary {
   background: var(--color-primary);

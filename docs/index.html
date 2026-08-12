@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>美股自选监控</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a1a2e'/><text y='26' font-size='24'>📈</text></svg>">
-<link rel="stylesheet" href="css/app.css?v=9">
+<link rel="stylesheet" href="css/app.css?v=10">
 </head>
 <body>
 
@@ -71,9 +71,11 @@
       <button id="btn-add" class="btn-primary">+ 添加</button>
     </div>
     <div id="add-form" class="add-form hidden">
-      <input type="text" id="add-symbol" placeholder="输入美股代码，如 AAPL" autocomplete="off">
+      <div class="add-symbol-wrap">
+        <input type="text" id="add-symbol" placeholder="输入美股代码，如 AAPL" autocomplete="off">
+        <div id="add-suggestions" class="suggestions-dropdown hidden"></div>
+      </div>
       <input type="text" id="add-industry" placeholder="输入行业，如 科技、AI芯片" autocomplete="off" class="add-industry-input">
-      <div id="add-suggestions" class="suggestions-dropdown hidden"></div>
       <div class="add-actions">
         <button id="btn-confirm-add" class="btn-primary btn-sm">确认添加</button>
         <button id="btn-cancel-add" class="btn-ghost btn-sm">取消</button>
@@ -184,7 +186,7 @@
 
 <script src="js/indicators.js?v=2"></script>
 <script src="js/charts.js?v=1"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/app.js?v=10"></script>
 <script src="js/intraday.js?v=2"></script>
 </body>
 </html>
