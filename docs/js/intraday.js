@@ -6,11 +6,26 @@ const Intraday = {
   activePeriod: '300',
   loaded: false,
   active: false,
+  watchlist: [],  // symbols the user manually added (persisted in localStorage)
 
+  // ---- Persistence ----
+  loadWatchlist() {
+    try {
+      var raw = localStorage.getItem('us_intraday_watchlist');
+      this.watchlist = raw ? JSON.parse(raw) : [];
+    } catch(e) { this.watchlist = []; }
+  },
+
+  saveWatchlist() {
+    try { localStorage.setItem('us_intraday_watchlist', JSON.stringify(this.watchlist)); }
+    catch(e) {}
+  },
+
+  // ---- Data ----
   async load() {
     try {
-      const ts = Date.now();
-      let resp = await fetch('data/intraday_stats.json?t=' + ts);
+      var ts = Date.now();
+      var resp = await fetch('data/intraday_stats.json?t=' + ts);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       this.data = await resp.json();
       this.loaded = true;
@@ -20,32 +35,135 @@ const Intraday = {
     }
   },
 
-  getStocks() {
+  // Returns stocks that have intraday data, sorted by swing mean
+  getAvailableStocks() {
     if (!this.data || !this.data.stocks) return [];
-    // Respect all App filters: watchlist, search, industry, starred
-    let watchSet;
-    if (App.filteredSymbols) {
-      watchSet = new Set(App.filteredSymbols);
-    } else {
-      watchSet = new Set(App.watchlist);
-    }
-    const result = [];
-    for (const [sym, info] of Object.entries(this.data.stocks)) {
-      if (!watchSet.has(sym)) continue;
-      if (App.activeIndustry && App.getIndustry(sym) !== App.activeIndustry) continue;
-      if (App.showStarredOnly && !App.isStarred(sym)) continue;
+    var result = [];
+    for (var sym in this.data.stocks) {
+      var info = this.data.stocks[sym];
       if (info.periods && info.periods[this.activePeriod]) {
-        result.push({ symbol: sym, ...info });
+        result.push({ symbol: sym, name: info.name || sym, close: info.close, sector: info.sector || '' });
       }
     }
-    result.sort((a, b) => {
-      const aS = a.periods[this.activePeriod]?.swing?.mean || 0;
-      const bS = b.periods[this.activePeriod]?.swing?.mean || 0;
-      return bS - aS;
+    result.sort(function(a, b) {
+      var aS = a.symbol;
+      var bS = b.symbol;
+      // Prefer larger market cap stocks at top (approximated by close price)
+      return (b.close || 0) - (a.close || 0);
     });
     return result;
   },
 
+  // Returns ONLY user-added stocks with their period data
+  getStocks() {
+    if (!this.data || !this.data.stocks) return [];
+    var self = this;
+    var result = [];
+    this.watchlist.forEach(function(sym) {
+      var info = self.data.stocks[sym];
+      if (info && info.periods && info.periods[self.activePeriod]) {
+        result.push({ symbol: sym, name: info.name || sym, close: info.close, sector: info.sector || '', periods: info.periods });
+      }
+    });
+    return result;
+  },
+
+  // Add a symbol to intraday watchlist
+  addStock(symbol) {
+    var sym = symbol.toUpperCase();
+    if (this.watchlist.indexOf(sym) !== -1) return false; // already added
+    if (!this.data || !this.data.stocks[sym]) return false; // no intraday data
+    this.watchlist.push(sym);
+    this.saveWatchlist();
+    this.render();
+    return true;
+  },
+
+  // Remove a symbol from intraday watchlist
+  removeStock(symbol) {
+    var idx = this.watchlist.indexOf(symbol);
+    if (idx === -1) return;
+    this.watchlist.splice(idx, 1);
+    this.saveWatchlist();
+    this.render();
+  },
+
+  // ---- Search autocomplete ----
+  onSearchInput(e) {
+    var query = e.target.value.trim().toUpperCase();
+    var dropdown = document.getElementById('intraday-suggestions');
+    if (!dropdown) return;
+    if (!query || query.length < 1) {
+      dropdown.classList.add('hidden');
+      dropdown.innerHTML = '';
+      return;
+    }
+
+    // Find matching stocks NOT already in watchlist
+    var available = this.getAvailableStocks();
+    var matches = [];
+    for (var i = 0; i < available.length; i++) {
+      var s = available[i];
+      var sym = s.symbol.toUpperCase();
+      var name = (s.name || '').toUpperCase();
+      if (sym.indexOf(query) !== -1 || name.indexOf(query) !== -1) {
+        if (this.watchlist.indexOf(s.symbol) === -1) {
+          matches.push(s);
+        }
+      }
+    }
+    if (matches.length === 0) {
+      dropdown.classList.add('hidden');
+      dropdown.innerHTML = '';
+      return;
+    }
+
+    // Prefer prefix matches
+    var prefix = matches.filter(function(s) { return s.symbol.toUpperCase().startsWith(query); });
+    var rest = matches.filter(function(s) { return !s.symbol.toUpperCase().startsWith(query); });
+    var results = prefix.concat(rest).slice(0, 8);
+
+    var self = this;
+    var html = '';
+    results.forEach(function(s) {
+      html += '<div class="suggestion-item" data-symbol="' + s.symbol + '">' +
+        '<span class="sugg-symbol">' + s.symbol + '</span>' +
+        '<span class="sugg-name">' + (s.name || '') + '</span>' +
+        '<span class="sugg-sector">' + (s.sector || '') + '</span>' +
+      '</div>';
+    });
+    dropdown.innerHTML = html;
+    dropdown.classList.remove('hidden');
+
+    var items = dropdown.querySelectorAll('.suggestion-item');
+    items.forEach(function(item) {
+      item.addEventListener('mousedown', function(ev) {
+        ev.preventDefault();
+        var sym = item.getAttribute('data-symbol');
+        self.addStock(sym);
+        document.getElementById('intraday-search').value = '';
+        self.hideSuggestions();
+      });
+      item.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var sym = item.getAttribute('data-symbol');
+          self.addStock(sym);
+          document.getElementById('intraday-search').value = '';
+          self.hideSuggestions();
+        }
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); var n = item.nextElementSibling; if (n) n.focus(); }
+        if (ev.key === 'ArrowUp') { ev.preventDefault(); var p = item.previousElementSibling; if (p) p.focus(); else document.getElementById('intraday-search').focus(); }
+      });
+    });
+  },
+
+  hideSuggestions() {
+    var dropdown = document.getElementById('intraday-suggestions');
+    if (dropdown) { dropdown.classList.add('hidden'); dropdown.innerHTML = ''; }
+  },
+
+  // ---- Formatting ----
   fmtPrice(p) {
     if (p == null || isNaN(p)) return '-';
     return p.toFixed(2);
@@ -63,32 +181,34 @@ const Intraday = {
     return '';
   },
 
+  // ---- Table rendering ----
   buildHead() {
-    return `<tr>
-      <th rowspan="2" class="th-fixed th-stock-col">股票</th>
-      <th rowspan="2" class="th-price-col">当前价</th>
-      <th colspan="5" class="th-grp th-grp-up">📈 最高涨幅</th>
-      <th colspan="5" class="th-grp th-grp-down">📉 最低跌幅</th>
-      <th colspan="4" class="th-grp th-grp-swing">📐 震荡幅度</th>
-    </tr>
-    <tr>
-      <th class="th-s">均值</th><th class="th-s">σ</th>
-      <th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>
-      <th class="th-s">均值</th><th class="th-s">σ</th>
-      <th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>
-      <th class="th-s">均值</th><th class="th-s">σ</th>
-      <th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th>
-    </tr>`;
+    return '<tr>' +
+      '<th rowspan="2" class="th-fixed th-stock-col">股票</th>' +
+      '<th rowspan="2" class="th-price-col">当前价</th>' +
+      '<th rowspan="2"></th>' +
+      '<th colspan="5" class="th-grp th-grp-up">📈 最高涨幅</th>' +
+      '<th colspan="5" class="th-grp th-grp-down">📉 最低跌幅</th>' +
+      '<th colspan="4" class="th-grp th-grp-swing">📐 震荡幅度</th>' +
+    '</tr>' +
+    '<tr>' +
+      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
+      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>' +
+      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
+      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>' +
+      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
+      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th>' +
+    '</tr>';
   },
 
-  sigmaCells(stats, isDown) {
+  sigmaCells(stats) {
     if (!stats || !stats.sigma_1) return '<td colspan="5" class="td-na">-</td>';
-    let html = `<td class="td-mean">${this.fmtPct(stats.mean)}</td>`;
-    html += `<td class="td-std">${this.fmtPct(stats.std)}</td>`;
-    for (const s of [1, 2, 3]) {
-      const sig = stats[`sigma_${s}`];
+    var html = '<td class="td-mean">' + this.fmtPct(stats.mean) + '</td>';
+    html += '<td class="td-std">' + this.fmtPct(stats.std) + '</td>';
+    for (var s = 1; s <= 3; s++) {
+      var sig = stats['sigma_' + s];
       if (sig) {
-        html += `<td class="td-sig"><span class="sig-price">$${this.fmtPrice(sig.price)}</span><span class="sig-exceed ${this.colorClass(sig.exceed_pct, 30)}">${sig.exceed_pct}%</span></td>`;
+        html += '<td class="td-sig"><span class="sig-price">$' + this.fmtPrice(sig.price) + '</span><span class="sig-exceed ' + this.colorClass(sig.exceed_pct, 30) + '">' + sig.exceed_pct + '%</span></td>';
       } else {
         html += '<td class="td-na">-</td>';
       }
@@ -98,12 +218,12 @@ const Intraday = {
 
   swingSigmaCells(stats) {
     if (!stats || !stats.sigma_1) return '<td colspan="4" class="td-na">-</td>';
-    let html = `<td class="td-mean">${this.fmtPct(stats.mean)}</td>`;
-    html += `<td class="td-std">${this.fmtPct(stats.std)}</td>`;
-    for (const s of [1, 2]) {
-      const sig = stats[`sigma_${s}`];
+    var html = '<td class="td-mean">' + this.fmtPct(stats.mean) + '</td>';
+    html += '<td class="td-std">' + this.fmtPct(stats.std) + '</td>';
+    for (var s = 1; s <= 2; s++) {
+      var sig = stats['sigma_' + s];
       if (sig) {
-        html += `<td class="td-sig"><span class="sig-range">±${this.fmtPct(sig.pct)}</span><span class="sig-exceed ${this.colorClass(sig.exceed_pct, 30)}">${sig.exceed_pct}%</span></td>`;
+        html += '<td class="td-sig"><span class="sig-range">±' + this.fmtPct(sig.pct) + '</span><span class="sig-exceed ' + this.colorClass(sig.exceed_pct, 30) + '">' + sig.exceed_pct + '%</span></td>';
       } else {
         html += '<td class="td-na">-</td>';
       }
@@ -112,46 +232,59 @@ const Intraday = {
   },
 
   render() {
-    const thead = document.getElementById('intraday-thead');
-    const tbody = document.getElementById('intraday-tbody');
-    const empty = document.getElementById('intraday-empty');
-    const table = document.getElementById('intraday-table');
+    var thead = document.getElementById('intraday-thead');
+    var tbody = document.getElementById('intraday-tbody');
+    var empty = document.getElementById('intraday-empty');
+    var table = document.getElementById('intraday-table');
 
     if (!this.loaded || !this.data) {
-      empty.classList.remove('hidden');
+      if (empty) empty.classList.remove('hidden');
       if (table) table.style.display = 'none';
       return;
     }
 
-    const stocks = this.getStocks();
+    var stocks = this.getStocks();
     if (stocks.length === 0) {
-      empty.classList.remove('hidden');
+      if (empty) { empty.classList.remove('hidden'); empty.style.display = ''; }
       if (table) table.style.display = 'none';
       return;
     }
 
-    empty.classList.add('hidden');
+    if (empty) { empty.classList.add('hidden'); empty.style.display = 'none'; }
     if (table) table.style.display = '';
     thead.innerHTML = this.buildHead();
 
-    let rows = '';
-    for (const s of stocks) {
-      const p = s.periods[this.activePeriod];
+    var rows = '';
+    var self = this;
+    for (var i = 0; i < stocks.length; i++) {
+      var s = stocks[i];
+      var p = s.periods[this.activePeriod];
       if (!p) continue;
-      rows += `<tr>
-        <td class="td-fixed td-stock-col">
-          <span class="s-sym">${s.symbol}</span>
-          <span class="s-name">${s.name}</span>
-        </td>
-        <td class="td-price-col">$${this.fmtPrice(s.close)}</td>
-        ${this.sigmaCells(p.up, false)}
-        ${this.sigmaCells(p.down, true)}
-        ${this.swingSigmaCells(p.swing)}
-      </tr>`;
+      rows += '<tr>' +
+        '<td class="td-fixed td-stock-col">' +
+          '<span class="s-sym">' + s.symbol + '</span>' +
+          '<span class="s-name">' + s.name + '</span>' +
+        '</td>' +
+        '<td class="td-price-col">$' + this.fmtPrice(s.close) + '</td>' +
+        '<td class="td-del"><button class="btn-intraday-del" data-symbol="' + s.symbol + '" title="移除">✕</button></td>' +
+        this.sigmaCells(p.up) +
+        this.sigmaCells(p.down) +
+        this.swingSigmaCells(p.swing) +
+      '</tr>';
     }
     tbody.innerHTML = rows;
 
-    const updateEl = document.getElementById('intraday-update-time');
+    // Bind delete buttons
+    var delBtns = tbody.querySelectorAll('.btn-intraday-del');
+    delBtns.forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        self.removeStock(btn.getAttribute('data-symbol'));
+      });
+    });
+
+    // Update time
+    var updateEl = document.getElementById('intraday-update-time');
     if (updateEl && this.data) {
       updateEl.textContent = this.data.updated_at || '未知';
     }
@@ -162,6 +295,7 @@ const Intraday = {
     document.getElementById('signals-section').classList.add('hidden');
     document.getElementById('industries-section').classList.add('hidden');
     document.getElementById('intraday-section').classList.remove('hidden');
+    this.loadWatchlist();
     this.render();
   },
 
@@ -172,58 +306,71 @@ const Intraday = {
 
   switchPeriod(period) {
     this.activePeriod = period;
-    document.querySelectorAll('.period-tab').forEach(t => {
+    document.querySelectorAll('#intraday-period-tabs .period-tab').forEach(function(t) {
       t.classList.toggle('active', t.dataset.period === period);
     });
     this.render();
   },
 
   init() {
-    const self = this;
+    var self = this;
+    this.loadWatchlist();
 
     // Period tabs
     document.getElementById('intraday-period-tabs').addEventListener('click', function(e) {
-      const tab = e.target.closest('.period-tab');
+      var tab = e.target.closest('.period-tab');
       if (tab) self.switchPeriod(tab.dataset.period);
     });
 
+    // Search input for adding stocks
+    var searchInput = document.getElementById('intraday-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', function(e) { self.onSearchInput(e); });
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          var first = document.querySelector('#intraday-suggestions .suggestion-item');
+          if (first) first.focus();
+        }
+        if (e.key === 'Escape') { self.hideSuggestions(); }
+      });
+      searchInput.addEventListener('blur', function() {
+        setTimeout(function() { self.hideSuggestions(); }, 150);
+      });
+    }
+
     // Sidebar nav: intraday
-    const intraNav = document.querySelector('.sidebar-item[data-nav="intraday"]');
+    var intraNav = document.querySelector('.sidebar-item[data-nav="intraday"]');
     if (intraNav) {
       intraNav.addEventListener('click', async function() {
-        document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
-        document.querySelectorAll('.sidebar-industry-item').forEach(i => i.classList.remove('active'));
+        document.querySelectorAll('.sidebar-item').forEach(function(i) { i.classList.remove('active'); });
+        document.querySelectorAll('.sidebar-industry-item').forEach(function(i) { i.classList.remove('active'); });
         intraNav.classList.add('active');
-        // Keep current filters (starred, industry, search) — user wants to see intraday for filtered stocks
         if (!self.loaded) await self.load();
         self.show();
       });
     }
 
-    // Patch existing nav clicks to hide intraday when switching away
+    // Hide intraday when switching away
     function hideIntradayOnNav(sel) {
-      const el = document.querySelector(sel);
+      var el = document.querySelector(sel);
       if (!el) return;
-      el.addEventListener('click', function() {
-        self.hide();
-      });
+      el.addEventListener('click', function() { self.hide(); });
     }
     hideIntradayOnNav('.sidebar-item[data-nav="signals"]');
     hideIntradayOnNav('.sidebar-item[data-nav="starred"]');
 
-    // Also hide intraday when clicking industry items (use event delegation)
-    const industriesEl = document.getElementById('sidebar-industries');
+    // Industry item clicks also hide intraday
+    var industriesEl = document.getElementById('sidebar-industries');
     if (industriesEl) {
       industriesEl.addEventListener('click', function(e) {
-        if (e.target.closest('.sidebar-industry-item')) {
-          self.hide();
-        }
+        if (e.target.closest('.sidebar-industry-item')) { self.hide(); }
       });
     }
   }
 };
 
-// Auto-init on DOM ready
+// Auto-init
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function() { Intraday.init(); });
 } else {

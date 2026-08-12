@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>美股自选监控</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a1a2e'/><text y='26' font-size='24'>📈</text></svg>">
-<link rel="stylesheet" href="css/app.css?v=10">
+<link rel="stylesheet" href="css/app.css?v=11">
 </head>
 <body>
 
@@ -101,6 +101,10 @@
   <section id="intraday-section" class="hidden">
     <h2 class="section-title">📊 日内波动分析</h2>
     <div class="intraday-controls">
+      <div class="intraday-search-wrap">
+        <input type="text" id="intraday-search" placeholder="🔍 搜索代码添加..." autocomplete="off">
+        <div id="intraday-suggestions" class="suggestions-dropdown hidden"></div>
+      </div>
       <div class="period-tabs" id="intraday-period-tabs">
         <button class="period-tab active" data-period="300">300天</button>
         <button class="period-tab" data-period="200">200天</button>
@@ -187,6 +191,6 @@
 <script src="js/indicators.js?v=2"></script>
 <script src="js/charts.js?v=1"></script>
 <script src="js/app.js?v=10"></script>
-<script src="js/intraday.js?v=2"></script>
+<script src="js/intraday.js?v=3"></script>
 </body>
 </html>
