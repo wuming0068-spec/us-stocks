@@ -22,10 +22,19 @@ const Intraday = {
 
   getStocks() {
     if (!this.data || !this.data.stocks) return [];
-    const watchSet = new Set(App.watchlist);
+    // Respect all App filters: watchlist, search, industry, starred
+    let watchSet;
+    if (App.filteredSymbols) {
+      watchSet = new Set(App.filteredSymbols);
+    } else {
+      watchSet = new Set(App.watchlist);
+    }
     const result = [];
     for (const [sym, info] of Object.entries(this.data.stocks)) {
-      if (watchSet.has(sym) && info.periods && info.periods[this.activePeriod]) {
+      if (!watchSet.has(sym)) continue;
+      if (App.activeIndustry && App.getIndustry(sym) !== App.activeIndustry) continue;
+      if (App.showStarredOnly && !App.isStarred(sym)) continue;
+      if (info.periods && info.periods[this.activePeriod]) {
         result.push({ symbol: sym, ...info });
       }
     }
@@ -185,8 +194,7 @@ const Intraday = {
         document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
         document.querySelectorAll('.sidebar-industry-item').forEach(i => i.classList.remove('active'));
         intraNav.classList.add('active');
-        App.activeIndustry = null;
-        App.showStarredOnly = false;
+        // Keep current filters (starred, industry, search) — user wants to see intraday for filtered stocks
         if (!self.loaded) await self.load();
         self.show();
       });

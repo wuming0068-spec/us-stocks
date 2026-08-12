@@ -500,6 +500,8 @@ App.render = function() {
   this.updateStatusBar();
   this.renderSignals();
   this.renderIndustries();
+  // Keep intraday module in sync with current filters when active
+  if (Intraday.active) Intraday.render();
 };
 
 /** Update data freshness bar */

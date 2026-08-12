@@ -1198,9 +1198,10 @@ body {
   color: var(--color-text-secondary);
 }
 
-/* Scrollable table wrapper */
+/* Scrollable table wrapper — vertical scroll with sticky thead */
 .intraday-table-wrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100vh - 180px); /* leave room for top-bar + controls */
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   background: var(--color-card);
