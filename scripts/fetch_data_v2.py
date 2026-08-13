@@ -542,6 +542,17 @@ def run(symbols: list[str] | None = None, history_days: int = DEFAULT_HISTORY_DA
     save_json(STOCKS_FILE, snapshot)
     log.info(f"Snapshot saved: {len(snapshot['stocks'])} stocks to {STOCKS_FILE}")
 
+    # ---- Rebuild intraday volatility stats (keep in sync with snapshot) ----
+    # fetch_data_v2.py updates history/*.json + stocks.json, but intraday_stats.json
+    # is derived from them. Rebuild it here so the intraday module never goes stale.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import intraday_stats
+        log.info("Rebuilding intraday volatility stats (intraday_stats.json)...")
+        intraday_stats.run()
+    except Exception as e:
+        log.warning(f"Failed to rebuild intraday stats: {e}")
+
     # ---- Print summary ----
     print()
     print("=" * 70)

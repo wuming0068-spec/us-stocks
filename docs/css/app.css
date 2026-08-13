@@ -1249,7 +1249,7 @@ body {
   border-collapse: collapse;
   font-size: 0.78rem;
   white-space: nowrap;
-  min-width: 1100px;
+  min-width: 950px;
 }
 
 #intraday-table thead {

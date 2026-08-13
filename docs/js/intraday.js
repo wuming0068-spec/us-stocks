@@ -187,43 +187,25 @@ const Intraday = {
       '<th rowspan="2" class="th-fixed th-stock-col">股票</th>' +
       '<th rowspan="2" class="th-price-col">当前价</th>' +
       '<th rowspan="2"></th>' +
-      '<th colspan="5" class="th-grp th-grp-up">📈 最高涨幅</th>' +
-      '<th colspan="5" class="th-grp th-grp-down">📉 最低跌幅</th>' +
+      '<th colspan="4" class="th-grp th-grp-up">📈 最高涨幅</th>' +
+      '<th colspan="4" class="th-grp th-grp-down">📉 最低跌幅</th>' +
       '<th colspan="4" class="th-grp th-grp-swing">📐 震荡幅度</th>' +
     '</tr>' +
     '<tr>' +
-      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
-      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>' +
-      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
-      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th><th class="th-s">3σ(超%)</th>' +
-      '<th class="th-s">均值</th><th class="th-s">σ</th>' +
-      '<th class="th-s">1σ(超%)</th><th class="th-s">2σ(超%)</th>' +
+      '<th class="th-s">均值</th><th class="th-s">P25</th><th class="th-s">P50</th><th class="th-s">P75</th>' +
+      '<th class="th-s">均值</th><th class="th-s">P25</th><th class="th-s">P50</th><th class="th-s">P75</th>' +
+      '<th class="th-s">均值</th><th class="th-s">P25</th><th class="th-s">P50</th><th class="th-s">P75</th>' +
     '</tr>';
   },
 
-  sigmaCells(stats) {
-    if (!stats || !stats.sigma_1) return '<td colspan="5" class="td-na">-</td>';
+  percentileCells(stats) {
+    if (!stats || stats.p50 == null) return '<td colspan="4" class="td-na">-</td>';
     var html = '<td class="td-mean">' + this.fmtPct(stats.mean) + '</td>';
-    html += '<td class="td-std">' + this.fmtPct(stats.std) + '</td>';
-    for (var s = 1; s <= 3; s++) {
-      var sig = stats['sigma_' + s];
-      if (sig) {
-        html += '<td class="td-sig"><span class="sig-price">$' + this.fmtPrice(sig.price) + '</span><span class="sig-exceed ' + this.colorClass(sig.exceed_pct, 30) + '">' + sig.exceed_pct + '%</span></td>';
-      } else {
-        html += '<td class="td-na">-</td>';
-      }
-    }
-    return html;
-  },
-
-  swingSigmaCells(stats) {
-    if (!stats || !stats.sigma_1) return '<td colspan="4" class="td-na">-</td>';
-    var html = '<td class="td-mean">' + this.fmtPct(stats.mean) + '</td>';
-    html += '<td class="td-std">' + this.fmtPct(stats.std) + '</td>';
-    for (var s = 1; s <= 2; s++) {
-      var sig = stats['sigma_' + s];
-      if (sig) {
-        html += '<td class="td-sig"><span class="sig-range">±' + this.fmtPct(sig.pct) + '</span><span class="sig-exceed ' + this.colorClass(sig.exceed_pct, 30) + '">' + sig.exceed_pct + '%</span></td>';
+    for (var p = 25; p <= 75; p += 25) {
+      var val = stats['p' + p];
+      var price = stats['p' + p + '_price'];
+      if (val != null) {
+        html += '<td class="td-sig"><span class="sig-price">$' + this.fmtPrice(price) + '</span><span class="sig-exceed">' + this.fmtPct(val) + '</span></td>';
       } else {
         html += '<td class="td-na">-</td>';
       }
@@ -267,9 +249,9 @@ const Intraday = {
         '</td>' +
         '<td class="td-price-col">$' + this.fmtPrice(s.close) + '</td>' +
         '<td class="td-del"><button class="btn-intraday-del" data-symbol="' + s.symbol + '" title="移除">✕</button></td>' +
-        this.sigmaCells(p.up) +
-        this.sigmaCells(p.down) +
-        this.swingSigmaCells(p.swing) +
+        this.percentileCells(p.up) +
+        this.percentileCells(p.down) +
+        this.percentileCells(p.swing) +
       '</tr>';
     }
     tbody.innerHTML = rows;
