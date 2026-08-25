@@ -2,8 +2,8 @@ name: Daily Stock Data Update
 
 on:
   schedule:
-    # UTC 00:00 = Beijing 08:00 (daily, including Sat for Friday US data)
-    - cron: '0 0 * * *'
+    # UTC 22:00 = Beijing 06:00 (daily, including Sat for Friday US data)
+    - cron: '0 22 * * *'
   workflow_dispatch:          # Manual trigger via GitHub UI
 
 permissions:
