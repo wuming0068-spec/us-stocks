@@ -2,8 +2,10 @@ name: Daily Stock Data Update
 
 on:
   schedule:
-    # UTC 00:00 = Beijing 08:00 (daily; ~4h after US close so Sina has latest daily bar)
+    # UTC 00:00 = Beijing 08:00 (primary; ~4h after US close so Sina has latest daily bar)
     - cron: '0 0 * * *'
+    # UTC 02:00 = Beijing 10:00 (backup; idempotent — skips commit if data already fresh)
+    - cron: '0 2 * * *'
   workflow_dispatch:          # Manual trigger via GitHub UI
 
 permissions:
