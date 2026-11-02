@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-02T04:46:38+08:00",
+  "updated_at": "2026-11-02T09:00:29+08:00",
   "data_date": "2026-10-30",
   "stocks": [
     {
@@ -1543,28 +1543,6 @@
       "signal_strength": null
     },
     {
-      "symbol": "SQQQ",
-      "name": "纳指3倍做空",
-      "sector": "大盘",
-      "market_cap": 0,
-      "prev_close": 37.83,
-      "open": 40.77,
-      "high": 42.96,
-      "low": 40.55,
-      "close": 41.83,
-      "volume": 67107225,
-      "vwap": 41.83,
-      "avg_volume": 48043713,
-      "change_pct": 10.57,
-      "ma5": 38.25,
-      "ma20": 36.17,
-      "k": 55.8,
-      "d": 55.1,
-      "j": 57.3,
-      "signal": "buy",
-      "signal_strength": "mild"
-    },
-    {
       "symbol": "QQQM",
       "name": "纳指100ETF",
       "sector": "大盘",
@@ -1587,26 +1565,26 @@
       "signal_strength": "mild"
     },
     {
-      "symbol": "SOXS",
-      "name": "半导体3倍做空",
+      "symbol": "SQQQ",
+      "name": "纳指3倍做空",
       "sector": "大盘",
       "market_cap": 0,
-      "prev_close": 41.68,
-      "open": 50.12,
-      "high": 54.85,
-      "low": 49.14,
-      "close": 52.08,
-      "volume": 97339881,
-      "vwap": 52.08,
-      "avg_volume": 78019975,
-      "change_pct": 24.95,
-      "ma5": 44.8,
-      "ma20": 41.8,
-      "k": 46.8,
-      "d": 48.5,
-      "j": 43.5,
-      "signal": null,
-      "signal_strength": null
+      "prev_close": 37.83,
+      "open": 40.77,
+      "high": 42.96,
+      "low": 40.55,
+      "close": 41.83,
+      "volume": 67107225,
+      "vwap": 41.83,
+      "avg_volume": 48043713,
+      "change_pct": 10.57,
+      "ma5": 38.25,
+      "ma20": 36.17,
+      "k": 55.8,
+      "d": 55.1,
+      "j": 57.3,
+      "signal": "buy",
+      "signal_strength": "mild"
     },
     {
       "symbol": "QQQ",
@@ -1651,6 +1629,28 @@
       "j": 107.8,
       "signal": "buy",
       "signal_strength": "mild"
+    },
+    {
+      "symbol": "SOXS",
+      "name": "半导体3倍做空",
+      "sector": "大盘",
+      "market_cap": 0,
+      "prev_close": 41.68,
+      "open": 50.12,
+      "high": 54.85,
+      "low": 49.14,
+      "close": 52.08,
+      "volume": 97339881,
+      "vwap": 52.08,
+      "avg_volume": 78019975,
+      "change_pct": 24.95,
+      "ma5": 44.8,
+      "ma20": 41.8,
+      "k": 46.8,
+      "d": 48.5,
+      "j": 43.5,
+      "signal": null,
+      "signal_strength": null
     }
   ]
 }
