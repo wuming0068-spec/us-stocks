@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-13T05:24:25+08:00",
+  "updated_at": "2026-11-13T09:13:24+08:00",
   "data_date": "2026-11-12",
   "stocks": [
     {
@@ -1499,28 +1499,6 @@
       "signal_strength": "mild"
     },
     {
-      "symbol": "QQQ",
-      "name": "纳指100ETF",
-      "sector": "大盘",
-      "market_cap": 0,
-      "prev_close": 690.38,
-      "open": 680.32,
-      "high": 694.56,
-      "low": 679.83,
-      "close": 688.17,
-      "volume": 37219462,
-      "vwap": 688.17,
-      "avg_volume": 50589738,
-      "change_pct": -0.32,
-      "ma5": 677.75,
-      "ma20": 696.94,
-      "k": 55.5,
-      "d": 39.3,
-      "j": 87.9,
-      "signal": "watch",
-      "signal_strength": null
-    },
-    {
       "symbol": "TQQQ",
       "name": "纳指3倍做多",
       "sector": "大盘",
@@ -1539,6 +1517,28 @@
       "k": 48.2,
       "d": 34.1,
       "j": 76.6,
+      "signal": "watch",
+      "signal_strength": null
+    },
+    {
+      "symbol": "SOXS",
+      "name": "半导体3倍做空",
+      "sector": "大盘",
+      "market_cap": 0,
+      "prev_close": 45.32,
+      "open": 49.71,
+      "high": 50.03,
+      "low": 43.41,
+      "close": 45.72,
+      "volume": 122703646,
+      "vwap": 45.72,
+      "avg_volume": 91063763,
+      "change_pct": 0.88,
+      "ma5": 54.5,
+      "ma20": 52.05,
+      "k": 30.2,
+      "d": 48.1,
+      "j": -5.8,
       "signal": "watch",
       "signal_strength": null
     },
@@ -1587,28 +1587,6 @@
       "signal_strength": null
     },
     {
-      "symbol": "SOXS",
-      "name": "半导体3倍做空",
-      "sector": "大盘",
-      "market_cap": 0,
-      "prev_close": 45.32,
-      "open": 49.71,
-      "high": 50.03,
-      "low": 43.41,
-      "close": 45.72,
-      "volume": 122703646,
-      "vwap": 45.72,
-      "avg_volume": 91063763,
-      "change_pct": 0.88,
-      "ma5": 54.5,
-      "ma20": 52.05,
-      "k": 30.2,
-      "d": 48.1,
-      "j": -5.8,
-      "signal": "watch",
-      "signal_strength": null
-    },
-    {
       "symbol": "SQQQ",
       "name": "纳指3倍做空",
       "sector": "大盘",
@@ -1651,6 +1629,28 @@
       "j": 107.8,
       "signal": "buy",
       "signal_strength": "mild"
+    },
+    {
+      "symbol": "QQQ",
+      "name": "纳指100ETF",
+      "sector": "大盘",
+      "market_cap": 0,
+      "prev_close": 690.38,
+      "open": 680.32,
+      "high": 694.56,
+      "low": 679.83,
+      "close": 688.17,
+      "volume": 37219462,
+      "vwap": 688.17,
+      "avg_volume": 50589738,
+      "change_pct": -0.32,
+      "ma5": 677.75,
+      "ma20": 696.94,
+      "k": 55.5,
+      "d": 39.3,
+      "j": 87.9,
+      "signal": "watch",
+      "signal_strength": null
     }
   ]
 }
